@@ -302,8 +302,8 @@ func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptio
 	} else {
 		propertiesMap["RECONSUMETIMES"] = "1"
 	}
-	propertiesMap["DELAY_TIME"] = fmt.Sprint(delayTime * reconsumeOptions.DelayTimeUnit().Milliseconds())
-	propertiesMap["DELAY"] = fmt.Sprint(int64(delayLevels) * reconsumeOptions.DelayTimeUnit().Milliseconds())
+	propertiesMap["DELAY_TIME"] = fmt.Sprint(delayTime * (reconsumeOptions.DelayTimeUnit().Nanoseconds() / 1e6))
+	propertiesMap["DELAY"] = fmt.Sprint(int64(delayLevels) * (reconsumeOptions.DelayTimeUnit().Nanoseconds() / 1e6))
 
 	if reconsumeTimes == 1 {
 		propertiesMap["REAL_TOPIC"] = msg.Topic()
