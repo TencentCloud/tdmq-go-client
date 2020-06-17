@@ -18,17 +18,14 @@
     under the License.
 
 -->
-[![GoDoc](https://img.shields.io/badge/Godoc-reference-blue.svg)](https://godoc.org/github.com/apache/pulsar-client-go)
-[![Go Report Card](https://goreportcard.com/badge/github.com/apache/pulsar-client-go)](https://goreportcard.com/report/github.com/apache/pulsar-client-go)
-[![Language](https://img.shields.io/badge/Language-Go-blue.svg)](https://golang.org/)
-[![LICENSE](https://img.shields.io/hexpm/l/pulsar.svg)](https://github.com/apache/pulsar-client-go/blob/master/LICENSE)
-# Apache Pulsar Go Client Library
 
-A Go client library for the [Apache Pulsar](https://pulsar.incubator.apache.org/) project.
+# Tencent TDMQ Go Client Library
+
+A Go client library for the [Tencent TDMQ](https://cloud.tencent.com/product/tdmq) project.
 
 ## Goal
 
-This projects is developing a pure-Go client library for Pulsar that does not
+This projects is developing a pure-Go client library for TDMQ that does not
 depend on the C++ Pulsar library.
 
 Once feature parity and stability are reached, this will supersede the current
@@ -40,7 +37,7 @@ CGo based library.
 
 ## Status
 
-Check the Projects page at https://github.com/apache/pulsar-client-go/projects for
+Check the Projects page at https://github.com/TencentCloud/tdmq-go-client/projects for
 tracking the status and the progress.
 
 ## Usage
@@ -48,7 +45,7 @@ tracking the status and the progress.
 Import the client library:
 
 ```go
-import "github.com/apache/pulsar-client-go/pulsar"
+import "github.com/TencentCloud/tdmq-go-client/pulsar"
 ```
 
 Create a Producer:
@@ -132,25 +129,27 @@ for reader.HasNext() {
 		msg.ID(), string(msg.Payload()))
 }
 ```
+Auth Cloud Config:
+```go
+authParams := make(map[string]string)
+authParams["secretId"] = "AKxxxxxxxxxxCx"
+authParams["secretKey"] = "SDxxxxxxxxxxCb"
+authParams["region"] = "ap-guangzhou"
+authParams["ownerUin"] = "xxxxxxxxxx"
+authParams["uin"] = "xxxxxxxxxx"
+client, err := pulsar.NewClient(pulsar.ClientOptions{
+	URL:       "pulsar://9.xx.xx.8:6650",
+	AuthCloud: pulsar.NewAuthenticationCloudCam(authParams), //在这里配置CAM认证
+})
+if err != nil {
+	log.Fatal(err)
+}
+defer client.Close()
+```
 
-## Contributing
+## More
 
-Contributions are welcomed and greatly appreciated. See [CONTRIBUTING.md](CONTRIBUTING.md) for details on submitting patches and the contribution workflow.
-
-## Contact
-
-##### Mailing lists
-
-| Name                                                                          | Scope                           |                                                                 |                                                                     |                                                                              |
-|:------------------------------------------------------------------------------|:--------------------------------|:----------------------------------------------------------------|:--------------------------------------------------------------------|:-----------------------------------------------------------------------------|
-| [users@pulsar.apache.org](mailto:users@pulsar.apache.org) | User-related discussions        | [Subscribe](mailto:users-subscribe@pulsar.apache.org) | [Unsubscribe](mailto:users-unsubscribe@pulsar.apache.org) | [Archives](http://mail-archives.apache.org/mod_mbox/pulsar-users/) |
-| [dev@pulsar.apache.org](mailto:dev@pulsar.apache.org)     | Development-related discussions | [Subscribe](mailto:dev-subscribe@pulsar.apache.org)   | [Unsubscribe](mailto:dev-unsubscribe@pulsar.apache.org)   | [Archives](http://mail-archives.apache.org/mod_mbox/pulsar-dev/)   |
-
-##### Slack
-
-Pulsar slack channel `#dev-go` at https://apache-pulsar.slack.com/
-
-You can self-register at https://apache-pulsar.herokuapp.com/
+More information please see [TDMQ GO Client Doc](https://cloud.tencent.com/document/product/1179/44831)
 
 ## License
 
