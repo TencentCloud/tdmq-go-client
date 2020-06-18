@@ -26,7 +26,7 @@ import (
 )
 
 func main() {
-	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: "pulsar://9.134.243.77:6650"})
+	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: "pulsar://localhost:6650"})
 	if err != nil {
 		log.Fatal(err)
 	}
