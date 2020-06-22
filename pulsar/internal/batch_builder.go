@@ -18,7 +18,6 @@
 package internal
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
@@ -63,7 +62,7 @@ type BatchBuilder struct {
 
 // NewBatchBuilder init batch builder and return BatchBuilder pointer. Build a new batch message container.
 func NewBatchBuilder(maxMessages uint, maxBatchSize uint, producerName string, producerID uint64,
-	compressionType pb.CompressionType) (*BatchBuilder, error) {
+	compressionType pb.CompressionType, level compression.Level) (*BatchBuilder, error) {
 	if maxMessages == 0 {
 		maxMessages = DefaultMaxMessagesPerBatch
 	}
@@ -85,15 +84,11 @@ func NewBatchBuilder(maxMessages uint, maxBatchSize uint, producerName string, p
 			ProducerName: &producerName,
 		},
 		callbacks:           []interface{}{},
-		compressionProvider: getCompressionProvider(compressionType),
+		compressionProvider: getCompressionProvider(compressionType, level),
 	}
 
 	if compressionType != pb.CompressionType_NONE {
 		bb.msgMetadata.Compression = &compressionType
-	}
-
-	if !bb.compressionProvider.CanCompress() {
-		return nil, fmt.Errorf("compression provider %d can only decompress data", compressionType)
 	}
 
 	return bb, nil
@@ -180,16 +175,21 @@ func (bb *BatchBuilder) Flush() (batchData []byte, sequenceID uint64, callbacks 
 	return buffer.ReadableSlice(), sequenceID, callbacks
 }
 
-func getCompressionProvider(compressionType pb.CompressionType) compression.Provider {
+func (bb *BatchBuilder) Close() error {
+	return bb.compressionProvider.Close()
+}
+
+func getCompressionProvider(compressionType pb.CompressionType,
+	level compression.Level) compression.Provider {
 	switch compressionType {
 	case pb.CompressionType_NONE:
-		return compression.NoopProvider
+		return compression.NewNoopProvider()
 	case pb.CompressionType_LZ4:
-		return compression.Lz4Provider
+		return compression.NewLz4Provider()
 	case pb.CompressionType_ZLIB:
-		return compression.ZLibProvider
+		return compression.NewZLibProvider()
 	case pb.CompressionType_ZSTD:
-		return compression.ZStdProvider
+		return compression.NewZStdProvider(level)
 	default:
 		log.Panic("unsupported compression type")
 		return nil

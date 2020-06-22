@@ -24,31 +24,54 @@
 package compression
 
 import (
-	zstd "github.com/valyala/gozstd"
+	"github.com/DataDog/zstd"
+	log "github.com/sirupsen/logrus"
 )
 
 type zstdCGoProvider struct {
-	compressionLevel int
+	ctx       zstd.Ctx
+	level     Level
+	zstdLevel int
 }
 
-func newCGoZStdProvider(compressionLevel int) Provider {
-	return &zstdCGoProvider{
-		compressionLevel: compressionLevel,
+func newCGoZStdProvider(level Level) Provider {
+	z := &zstdCGoProvider{
+		ctx: zstd.NewCtx(),
 	}
+
+	switch level {
+	case Default:
+		z.zstdLevel = zstd.DefaultCompression
+	case Faster:
+		z.zstdLevel = zstd.BestSpeed
+	case Better:
+		z.zstdLevel = 9
+	}
+
+	return z
 }
 
-func NewZStdProvider() Provider {
-	return newCGoZStdProvider(zstd.DefaultCompressionLevel)
-}
-
-func (*zstdCGoProvider) CanCompress() bool {
-	return true
+func NewZStdProvider(level Level) Provider {
+	return newCGoZStdProvider(level)
 }
 
 func (z *zstdCGoProvider) Compress(data []byte) []byte {
-	return zstd.CompressLevel(nil, data, z.compressionLevel)
+	out, err := z.ctx.CompressLevel(nil, data, z.zstdLevel)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to compress")
+	}
+
+	return out
 }
 
 func (z *zstdCGoProvider) Decompress(compressedData []byte, originalSize int) ([]byte, error) {
-	return zstd.Decompress(nil, compressedData)
+	return z.ctx.Decompress(nil, compressedData)
+}
+
+func (z *zstdCGoProvider) Close() error {
+	return nil
+}
+
+func (z *zstdCGoProvider) Clone() Provider {
+	return newCGoZStdProvider(z.level)
 }

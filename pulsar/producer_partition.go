@@ -27,6 +27,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
+
 	"github.com/golang/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
@@ -95,7 +97,7 @@ func newPartitionProducer(client *client, topic string, options *ProducerOptions
 		topic:            topic,
 		options:          options,
 		producerID:       client.rpcClient.NewProducerID(),
-		eventsChan:       make(chan interface{}, 10),
+		eventsChan:       make(chan interface{}, maxPendingMessages),
 		batchFlushTicker: time.NewTicker(batchingMaxPublishDelay),
 		publishSemaphore: make(internal.Semaphore, maxPendingMessages),
 		pendingQueue:     internal.NewBlockingQueue(maxPendingMessages),
@@ -173,7 +175,8 @@ func (p *partitionProducer) grabCnx() error {
 	p.producerName = res.Response.ProducerSuccess.GetProducerName()
 	if p.batchBuilder == nil {
 		p.batchBuilder, err = internal.NewBatchBuilder(p.options.BatchingMaxMessages, p.options.BatchingMaxSize,
-			p.producerName, p.producerID, pb.CompressionType(p.options.CompressionType))
+			p.producerName, p.producerID, pb.CompressionType(p.options.CompressionType),
+			compression.Level(p.options.CompressionLevel))
 		if err != nil {
 			return err
 		}
@@ -508,6 +511,10 @@ func (p *partitionProducer) internalClose(req *closeProducer) {
 		p.log.WithError(err).Warn("Failed to close producer")
 	} else {
 		p.log.Info("Closed producer")
+	}
+
+	if err = p.batchBuilder.Close(); err != nil {
+		p.log.WithError(err).Warn("Failed to close batch builder")
 	}
 
 	atomic.StoreInt32(&p.state, producerClosed)
