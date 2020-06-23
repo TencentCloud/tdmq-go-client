@@ -9,10 +9,10 @@ import (
 func TestAuthenticationCloudCam_Initialize(t *testing.T) {
 	authCloudCam := NewDefaultAuthenticationCloudCam()
 	authParams := make(map[string]string)
-	authParams["secretId"] = "AKID35cjINI6m3zI4PrbUpnF9giEFkkMg5Cx"
-	authParams["secretKey"] = "SBMEhSrlABZb30UR00XfDP5Ev7yEzRCb"
+	authParams["secretId"] = "xxxxxxxxxx"
+	authParams["secretKey"] = "xxxxxxxxxx"
 	authParams["region"] = "ap-guangzhou"
-	authParams["apiUrl"] = "http://10.104.62.35:9502"
+	authParams["apiUrl"] = "http://xx.xx.xx.xx:xxxx"
 	//authParams["apiUrl"] = "http://localhost:8080"
 	err := authCloudCam.Initialize(authParams)
 	if err != nil {
@@ -26,10 +26,10 @@ func TestAuthenticationCloudCam_Initialize(t *testing.T) {
 func TestAuthenticationCloudCam_CreateAuthMetadata(t *testing.T) {
 	authCloudCam := NewDefaultAuthenticationCloudCam()
 	authParams := make(map[string]string)
-	authParams["secretId"] = "AKID35cjINI6m3zI4PrbUpnF9giEFkkMg5Cx"
-	authParams["secretKey"] = "SBMEhSrlABZb30UR00XfDP5Ev7yEzRCb"
+	authParams["secretId"] = "xxxxxxxxxx"
+	authParams["secretKey"] = "xxxxxxxxxx"
 	authParams["region"] = "ap-guangzhou"
-	authParams["apiUrl"] = "http://10.104.62.35:9502"
+	authParams["apiUrl"] = "http://xx.xx.xx.xx:xxxx"
 	//authParams["apiUrl"] = "http://localhost:8080"
 	err := authCloudCam.Initialize(authParams)
 	if err != nil {

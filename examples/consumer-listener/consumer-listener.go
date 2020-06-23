@@ -25,7 +25,7 @@ import (
 
 func main() {
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL: "pulsar://127.0.0.1:6650",
+		URL: "pulsar://localhost:6650",
 		//Authentication : pulsar.NewAuthenticationToken("****************************gegmx"),
 	})
 	if err != nil {
