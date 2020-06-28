@@ -23,13 +23,14 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/auth"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
+
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 const (

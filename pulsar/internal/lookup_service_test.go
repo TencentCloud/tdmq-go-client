@@ -21,8 +21,9 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
-	"github.com/golang/protobuf/proto"
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	"github.com/gogo/protobuf/proto"
+
 	"github.com/stretchr/testify/assert"
 )
 

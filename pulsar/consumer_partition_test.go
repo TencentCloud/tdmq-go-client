@@ -20,12 +20,11 @@ package pulsar
 import (
 	"testing"
 
+	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 
 	"github.com/stretchr/testify/assert"
-
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 )
 
 func TestSingleMessageIDNoAckTracker(t *testing.T) {

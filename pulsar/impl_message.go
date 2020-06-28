@@ -23,9 +23,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 type messageID struct {
@@ -140,6 +140,7 @@ type message struct {
 	publishTime         time.Time
 	eventTime           time.Time
 	key                 string
+	producerName        string
 	payLoad             []byte
 	msgID               MessageID
 	properties          map[string]string
@@ -187,6 +188,10 @@ func (msg *message) IsReplicated() bool {
 
 func (msg *message) GetReplicatedFrom() string {
 	return msg.replicatedFrom
+}
+
+func (msg *message) ProducerName() string {
+	return msg.producerName
 }
 
 func newAckTracker(size int) *ackTracker {

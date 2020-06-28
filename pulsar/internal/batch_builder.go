@@ -21,8 +21,9 @@ import (
 	"time"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
-	"github.com/golang/protobuf/proto"
+
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -34,6 +35,10 @@ const (
 	// DefaultMaxMessagesPerBatch init default num of entries in per batch.
 	DefaultMaxMessagesPerBatch = 1000
 )
+
+type BuffersPool interface {
+	GetBuffer() Buffer
+}
 
 // BatchBuilder wraps the objects needed to build a batch.
 type BatchBuilder struct {
@@ -58,11 +63,13 @@ type BatchBuilder struct {
 	callbacks   []interface{}
 
 	compressionProvider compression.Provider
+	buffersPool         BuffersPool
 }
 
 // NewBatchBuilder init batch builder and return BatchBuilder pointer. Build a new batch message container.
 func NewBatchBuilder(maxMessages uint, maxBatchSize uint, producerName string, producerID uint64,
-	compressionType pb.CompressionType, level compression.Level) (*BatchBuilder, error) {
+	compressionType pb.CompressionType, level compression.Level,
+	bufferPool BuffersPool) (*BatchBuilder, error) {
 	if maxMessages == 0 {
 		maxMessages = DefaultMaxMessagesPerBatch
 	}
@@ -85,6 +92,7 @@ func NewBatchBuilder(maxMessages uint, maxBatchSize uint, producerName string, p
 		},
 		callbacks:           []interface{}{},
 		compressionProvider: getCompressionProvider(compressionType, level),
+		buffersPool:         bufferPool,
 	}
 
 	if compressionType != pb.CompressionType_NONE {
@@ -152,7 +160,7 @@ func (bb *BatchBuilder) reset() {
 }
 
 // Flush all the messages buffered in the client and wait until all messages have been successfully persisted.
-func (bb *BatchBuilder) Flush() (batchData []byte, sequenceID uint64, callbacks []interface{}) {
+func (bb *BatchBuilder) Flush() (batchData Buffer, sequenceID uint64, callbacks []interface{}) {
 	if bb.numMessages == 0 {
 		// No-Op for empty batch
 		return nil, 0, nil
@@ -163,16 +171,15 @@ func (bb *BatchBuilder) Flush() (batchData []byte, sequenceID uint64, callbacks 
 	bb.cmdSend.Send.NumMessages = proto.Int32(int32(bb.numMessages))
 
 	uncompressedSize := bb.buffer.ReadableBytes()
-	compressed := bb.compressionProvider.Compress(bb.buffer.ReadableSlice())
 	bb.msgMetadata.UncompressedSize = &uncompressedSize
 
-	buffer := NewBuffer(4096)
-	serializeBatch(buffer, bb.cmdSend, bb.msgMetadata, compressed)
+	buffer := bb.buffersPool.GetBuffer()
+	serializeBatch(buffer, bb.cmdSend, bb.msgMetadata, bb.buffer, bb.compressionProvider)
 
 	callbacks = bb.callbacks
 	sequenceID = bb.cmdSend.Send.GetSequenceId()
 	bb.reset()
-	return buffer.ReadableSlice(), sequenceID, callbacks
+	return buffer, sequenceID, callbacks
 }
 
 func (bb *BatchBuilder) Close() error {

@@ -27,13 +27,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 type consumerState int
@@ -544,6 +544,7 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 				publishTime:         timeFromUnixTimestampMillis(msgMeta.GetPublishTime()),
 				eventTime:           timeFromUnixTimestampMillis(smm.GetEventTime()),
 				key:                 smm.GetPartitionKey(),
+				producerName:        msgMeta.GetProducerName(),
 				properties:          internal.ConvertToStringMap(smm.GetProperties()),
 				topic:               pc.topic,
 				msgID:               msgID,
@@ -557,6 +558,7 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 				publishTime:         timeFromUnixTimestampMillis(msgMeta.GetPublishTime()),
 				eventTime:           timeFromUnixTimestampMillis(msgMeta.GetEventTime()),
 				key:                 msgMeta.GetPartitionKey(),
+				producerName:        msgMeta.GetProducerName(),
 				properties:          internal.ConvertToStringMap(msgMeta.GetProperties()),
 				topic:               pc.topic,
 				msgID:               msgID,
@@ -999,7 +1001,7 @@ func (pc *partitionConsumer) Decompress(msgMeta *pb.MessageMetadata, payload int
 		pc.compressionProviders[msgMeta.GetCompression()] = provider
 	}
 
-	uncompressed, err := provider.Decompress(payload.ReadableSlice(), int(msgMeta.GetUncompressedSize()))
+	uncompressed, err := provider.Decompress(nil, payload.ReadableSlice(), int(msgMeta.GetUncompressedSize()))
 	if err != nil {
 		return nil, err
 	}

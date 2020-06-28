@@ -15,47 +15,46 @@
 // specific language governing permissions and limitations
 // under the License.
 
-package compression
+package internal
 
 import (
-	"bytes"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
-type noopProvider struct{}
+func TestSemaphore(t *testing.T) {
+	s := NewSemaphore(3)
 
-// NewNoopProvider returns a Provider interface that does not compress the data
-func NewNoopProvider() Provider {
-	return &noopProvider{}
-}
+	const n = 10
 
-func (noopProvider) CompressMaxSize(originalSize int) int {
-	return originalSize
-}
+	wg := sync.WaitGroup{}
+	wg.Add(n)
 
-func (noopProvider) Compress(dst, src []byte) []byte {
-	if dst == nil {
-		dst = make([]byte, len(src))
+	for i := 0; i < n; i++ {
+		go func() {
+			s.Acquire()
+			time.Sleep(100 * time.Millisecond)
+			s.Release()
+			wg.Done()
+		}()
 	}
 
-	b := bytes.NewBuffer(dst[:0])
-	b.Write(src)
-	return dst[:len(src)]
+	wg.Wait()
 }
 
-func (noopProvider) Decompress(dst, src []byte, originalSize int) ([]byte, error) {
-	if dst == nil {
-		dst = make([]byte, len(src))
-	}
+func TestSemaphore_TryAcquire(t *testing.T) {
+	s := NewSemaphore(1)
 
-	b := bytes.NewBuffer(dst[:0])
-	b.Write(src)
-	return dst[:len(src)], nil
-}
+	s.Acquire()
 
-func (noopProvider) Close() error {
-	return nil
-}
+	assert.False(t, s.TryAcquire())
 
-func (noopProvider) Clone() Provider {
-	return NewNoopProvider()
+	s.Release()
+
+	assert.True(t, s.TryAcquire())
+	assert.False(t, s.TryAcquire())
+	s.Release()
 }

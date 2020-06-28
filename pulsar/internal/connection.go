@@ -33,11 +33,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/auth"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
+
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 const (
@@ -69,7 +70,7 @@ type ConnectionListener interface {
 type Connection interface {
 	SendRequest(requestID uint64, req *pb.BaseCommand, callback func(*pb.BaseCommand, error))
 	SendRequestNoWait(req *pb.BaseCommand)
-	WriteData(data []byte)
+	WriteData(data Buffer)
 	RegisterListener(id uint64, listener ConnectionListener)
 	UnregisterListener(id uint64)
 	AddConsumeHandler(id uint64, handler ConsumerHandler)
@@ -152,7 +153,7 @@ type connection struct {
 	incomingRequestsCh chan *request
 	incomingCmdCh      chan *incomingCmd
 	closeCh            chan interface{}
-	writeRequestsCh    chan []byte
+	writeRequestsCh    chan Buffer
 
 	pendingReqs map[uint64]*request
 	listeners   map[uint64]ConnectionListener
@@ -194,7 +195,7 @@ func newConnection(logicalAddr *url.URL, physicalAddr *url.URL, tlsOptions *TLSO
 		// partition produces writing on a single connection. In general it's
 		// good to keep this above the number of partition producers assigned
 		// to a single connection.
-		writeRequestsCh:  make(chan []byte, 256),
+		writeRequestsCh:  make(chan Buffer, 256),
 		listeners:        make(map[uint64]ConnectionListener),
 		consumerHandlers: make(map[uint64]ConsumerHandler),
 	}
@@ -224,7 +225,8 @@ func newConnectionAuthCloud(logicalAddr *url.URL, physicalAddr *url.URL, tlsOpti
 		closeCh:            make(chan interface{}),
 		incomingRequestsCh: make(chan *request, 10),
 		incomingCmdCh:      make(chan *incomingCmd, 10),
-		writeRequestsCh:    make(chan []byte, 10),
+
+		writeRequestsCh:    make(chan Buffer, 10),
 		listeners:          make(map[uint64]ConnectionListener),
 		consumerHandlers:   make(map[uint64]ConsumerHandler),
 
@@ -427,22 +429,22 @@ func (c *connection) runPingCheck() {
 	}
 }
 
-func (c *connection) WriteData(data []byte) {
+func (c *connection) WriteData(data Buffer) {
 	c.writeRequestsCh <- data
 }
 
-func (c *connection) internalWriteData(data []byte) {
-	c.log.Debug("Write data: ", len(data))
-	if _, err := c.cnx.Write(data); err != nil {
+func (c *connection) internalWriteData(data Buffer) {
+	c.log.Debug("Write data: ", data.ReadableBytes())
+	if _, err := c.cnx.Write(data.ReadableSlice()); err != nil {
 		c.log.WithError(err).Warn("Failed to write on connection")
 		c.Close()
 	}
 }
 
-func (c *connection) writeCommand(cmd proto.Message) {
+func (c *connection) writeCommand(cmd *pb.BaseCommand) {
 	// Wire format
 	// [FRAME_SIZE] [CMD_SIZE][CMD]
-	cmdSize := uint32(proto.Size(cmd))
+	cmdSize := uint32(cmd.Size())
 	frameSize := cmdSize + 4
 
 	c.writeBufferLock.Lock()
@@ -450,15 +452,15 @@ func (c *connection) writeCommand(cmd proto.Message) {
 
 	c.writeBuffer.Clear()
 	c.writeBuffer.WriteUint32(frameSize)
+
 	c.writeBuffer.WriteUint32(cmdSize)
-	serialized, err := proto.Marshal(cmd)
+	_, err := cmd.MarshalToSizedBuffer(c.writeBuffer.WritableSlice()[:cmdSize])
 	if err != nil {
 		c.log.WithError(err).Fatal("Protobuf serialization error")
 	}
 
-	c.writeBuffer.Write(serialized)
-	data := c.writeBuffer.ReadableSlice()
-	c.internalWriteData(data)
+	c.writeBuffer.WrittenBytes(cmdSize)
+	c.internalWriteData(c.writeBuffer)
 }
 
 func (c *connection) receivedCommand(cmd *pb.BaseCommand, headersAndPayload Buffer) {
@@ -528,7 +530,7 @@ func (c *connection) internalReceivedCommand(cmd *pb.BaseCommand, headersAndPayl
 	}
 }
 
-func (c *connection) Write(data []byte) {
+func (c *connection) Write(data Buffer) {
 	c.writeRequestsCh <- data
 }
 

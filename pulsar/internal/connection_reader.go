@@ -19,11 +19,11 @@ package internal
 
 import (
 	"bufio"
+	"github.com/pkg/errors"
 	"io"
 
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
-	"github.com/golang/protobuf/proto"
-	"github.com/pkg/errors"
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	"github.com/gogo/protobuf/proto"
 )
 
 type connectionReader struct {

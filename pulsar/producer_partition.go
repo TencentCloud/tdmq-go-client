@@ -29,12 +29,12 @@ import (
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
 
-	"github.com/golang/protobuf/proto"
+	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
-
+	
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 const (
@@ -65,7 +65,8 @@ type partitionProducer struct {
 	batchFlushTicker    *time.Ticker
 
 	// Channel where app is posting messages to be published
-	eventsChan chan interface{}
+	eventsChan  chan interface{}
+	buffersPool sync.Pool
 
 	publishSemaphore internal.Semaphore
 	pendingQueue     internal.BlockingQueue
@@ -91,15 +92,20 @@ func newPartitionProducer(client *client, topic string, options *ProducerOptions
 	}
 
 	p := &partitionProducer{
-		state:            producerInit,
-		log:              log.WithField("topic", topic),
-		client:           client,
-		topic:            topic,
-		options:          options,
-		producerID:       client.rpcClient.NewProducerID(),
-		eventsChan:       make(chan interface{}, maxPendingMessages),
+		state:      producerInit,
+		log:        log.WithField("topic", topic),
+		client:     client,
+		topic:      topic,
+		options:    options,
+		producerID: client.rpcClient.NewProducerID(),
+		eventsChan: make(chan interface{}, maxPendingMessages),
+		buffersPool: sync.Pool{
+			New: func() interface{} {
+				return internal.NewBuffer(1024)
+			},
+		},
 		batchFlushTicker: time.NewTicker(batchingMaxPublishDelay),
-		publishSemaphore: make(internal.Semaphore, maxPendingMessages),
+		publishSemaphore: internal.NewSemaphore(int32(maxPendingMessages)),
 		pendingQueue:     internal.NewBlockingQueue(maxPendingMessages),
 		lastSequenceID:   -1,
 		partitionIdx:     partitionIdx,
@@ -176,7 +182,8 @@ func (p *partitionProducer) grabCnx() error {
 	if p.batchBuilder == nil {
 		p.batchBuilder, err = internal.NewBatchBuilder(p.options.BatchingMaxMessages, p.options.BatchingMaxSize,
 			p.producerName, p.producerID, pb.CompressionType(p.options.CompressionType),
-			compression.Level(p.options.CompressionLevel))
+			compression.Level(p.options.CompressionLevel),
+			p)
 		if err != nil {
 			return err
 		}
@@ -200,6 +207,12 @@ func (p *partitionProducer) grabCnx() error {
 }
 
 type connectionClosed struct{}
+
+func (p *partitionProducer) GetBuffer() internal.Buffer {
+	b := p.buffersPool.Get().(internal.Buffer)
+	b.Clear()
+	return b
+}
 
 func (p *partitionProducer) ConnectionClosed() {
 	// Trigger reconnection in the produce goroutine
@@ -357,7 +370,7 @@ func (p *partitionProducer) internalSend(request *sendRequest) {
 
 type pendingItem struct {
 	sync.Mutex
-	batchData    []byte
+	batchData    internal.Buffer
 	sequenceID   uint64
 	sendRequests []interface{}
 	completed    bool
@@ -429,14 +442,7 @@ func (p *partitionProducer) Send(ctx context.Context, msg *ProducerMessage) (Mes
 
 func (p *partitionProducer) SendAsync(ctx context.Context, msg *ProducerMessage,
 	callback func(MessageID, *ProducerMessage, error)) {
-	p.publishSemaphore.Acquire()
-	sr := &sendRequest{
-		ctx:              ctx,
-		msg:              msg,
-		callback:         callback,
-		flushImmediately: false,
-	}
-	p.eventsChan <- sr
+	p.internalSendAsync(ctx, msg, callback, false)
 }
 
 func (p *partitionProducer) internalSendAsync(ctx context.Context, msg *ProducerMessage,
@@ -491,6 +497,8 @@ func (p *partitionProducer) ReceivedSendReceipt(response *pb.CommandSendReceipt)
 
 	// Mark this pending item as done
 	pi.completed = true
+	// Return buffer to the pool since we're now done using it
+	p.buffersPool.Put(pi.batchData)
 }
 
 func (p *partitionProducer) internalClose(req *closeProducer) {

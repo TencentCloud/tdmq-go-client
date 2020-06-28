@@ -28,7 +28,8 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pb"
+
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 var ErrConsumerClosed = errors.New("consumer closed")
