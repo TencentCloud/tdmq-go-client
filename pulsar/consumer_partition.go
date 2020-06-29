@@ -306,7 +306,7 @@ func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptio
 		propertiesMap["REAL_TOPIC"] = msg.Topic()
 		propertiesMap["RETRY_TOPIC"] = pc.dlq.policy.RetryTopic
 		propertiesMap["ORIGIN_MESSAGE_ID"] = fmt.Sprint(msg.ID())
-		// In java client has "producer-name" with msg.Producer_Name
+		propertiesMap["producer_name"] = msg.ProducerName()
 	}
 
 	producerMsg := &ProducerMessage{
