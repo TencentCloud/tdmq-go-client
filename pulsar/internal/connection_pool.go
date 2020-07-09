@@ -99,7 +99,7 @@ func (p *connectionPool) GetConnection(logicalAddr *url.URL, physicalAddr *url.U
 
 	// Try to create a new connection
 	newConn := newConnectionAuthCloud(logicalAddr, physicalAddr, p.tlsOptions, p.connectionTimeout, p.auth, p.authCloud)
-	newCnx, wasCached := p.pool.LoadOrStore(logicalAddr.Host, newConn)
+	newCnx, wasCached := p.pool.LoadOrStore(key, newConn)
 	cnx := newCnx.(*connection)
 
 	if !wasCached {

@@ -97,7 +97,7 @@ type partitionConsumer struct {
 	topic        string
 	name         string
 	consumerID   uint64
-	partitionIdx int
+	partitionIdx int32
 
 	// shared channel
 	messageCh chan ConsumerMessage
@@ -136,7 +136,7 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 		topic:                options.topic,
 		name:                 options.consumerName,
 		consumerID:           client.rpcClient.NewConsumerID(),
-		partitionIdx:         options.partitionIdx,
+		partitionIdx:         int32(options.partitionIdx),
 		eventsCh:             make(chan interface{}, 3),
 		queueSize:            int32(options.receiverQueueSize),
 		queueCh:              make(chan []*message, options.receiverQueueSize),
@@ -527,7 +527,7 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 		msgID := newTrackingMessageID(
 			int64(pbMsgID.GetLedgerId()),
 			int64(pbMsgID.GetEntryId()),
-			i,
+			int32(i),
 			pc.partitionIdx,
 			ackTracker)
 
@@ -1063,7 +1063,7 @@ func convertToMessageID(id *pb.MessageIdData) *messageID {
 	}
 
 	if id.BatchIndex != nil {
-		msgID.batchIdx = int(*id.BatchIndex)
+		msgID.batchIdx = *id.BatchIndex
 	}
 
 	return msgID

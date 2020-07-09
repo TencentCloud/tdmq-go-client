@@ -25,9 +25,16 @@ import (
 )
 
 func main() {
+	authParams := make(map[string]string)
+	authParams["secretId"] = "AKxxxxxxxxxxCx"
+	authParams["secretKey"] = "SDxxxxxxxxxxCb"
+	authParams["region"] = "ap-guangzhou"
+	authParams["ownerUin"] = "xxxxxxxxxx"
+	authParams["uin"] = "xxxxxxxxxx"
 
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
-		URL: "pulsar://localhost:6650",
+		URL:       "pulsar://localhost:6650",
+		AuthCloud: pulsar.NewAuthenticationCloudCam(authParams),
 	})
 	if err != nil {
 		log.Fatal(err)

@@ -26,15 +26,21 @@ import (
 )
 
 func main() {
-	client, err := pulsar.NewClient(pulsar.ClientOptions{URL: "pulsar://localhost:6650"})
-	if err != nil {
-		log.Fatal(err)
-	}
+	authParams := make(map[string]string)
+	authParams["secretId"] = "AKxxxxxxxxxxCx"
+	authParams["secretKey"] = "SDxxxxxxxxxxCb"
+	authParams["region"] = "ap-guangzhou"
+	authParams["ownerUin"] = "xxxxxxxxxx"
+	authParams["uin"] = "xxxxxxxxxx"
+	client, err := pulsar.NewClient(pulsar.ClientOptions{
+		URL:       "pulsar://localhost:6650",
+		AuthCloud: pulsar.NewAuthenticationCloudCam(authParams),
+	})
 
 	defer client.Close()
 
 	reader, err := client.CreateReader(pulsar.ReaderOptions{
-		Topic:          "topic-1",
+		Topic:          "persistent://appid/namespace/topic-1",
 		StartMessageID: pulsar.EarliestMessageID(),
 	})
 	if err != nil {

@@ -53,7 +53,7 @@ func produceAndConsumerDemo(secretId, secretKey, uin, region, brokerUrl, topic, 
 
 	for i := 0; i < num; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("produceAndConsumerDemo test"),
+			Payload: []byte("produceAndConsumerDemo functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -96,7 +96,7 @@ func producerAsync(secretId, secretKey, uin, region, brokerUrl, topic, subname s
 	defer producer.Close()
 	for i := 0; i < 10; i++ {
 		producer.SendAsync(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("producerAsync test"),
+			Payload: []byte("producerAsync functions-demo"),
 		}, func(id pulsar.MessageID, message *pulsar.ProducerMessage, e error) {
 			if e != nil {
 				log.Fatal(e)
@@ -152,7 +152,7 @@ func producerCompression(secretId, secretKey, uin, region, brokerUrl, topic, sub
 	defer producer.Close()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload:      []byte("producerCompression type ZLib test" ),
+			Payload:      []byte("producerCompression type ZLib functions-demo" ),
 			DeliverAfter: 3 * time.Second,
 		}); err != nil {
 			log.Fatal(err)
@@ -172,7 +172,7 @@ func producerCompression(secretId, secretKey, uin, region, brokerUrl, topic, sub
 	defer producer1.Close()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer1.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("producerCompression type LZ4 test" ),
+			Payload: []byte("producerCompression type LZ4 functions-demo" ),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -191,7 +191,7 @@ func producerCompression(secretId, secretKey, uin, region, brokerUrl, topic, sub
 	defer producer2.Close()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer2.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("producerCompression type ZSTD test" ),
+			Payload: []byte("producerCompression type ZSTD functions-demo" ),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -242,9 +242,12 @@ func producerLastSequenceID(secretId, secretKey, uin, region, brokerUrl, topic, 
 		log.Fatal(err)
 	}
 	defer producer.Close()
+
+	sequence := int64(10)
 	for i := 0; i < 5; i++ {
 		if _, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("producerLastSequenceID test" ),
+			Payload:    []byte("producerLastSequenceID functions-demo" ),
+			SequenceID: &sequence,
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -301,7 +304,7 @@ func producerMessageRouter(secretId, secretKey, uin, region, brokerUrl, topic, s
 	defer producer.Close()
 	for i := 0; i < 5; i++ {
 		if msgID, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("producerMessageRouter test" ),
+			Payload: []byte("producerMessageRouter functions-demo" ),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -354,7 +357,7 @@ func producerDelayMsg(secretId, secretKey, uin, region, brokerUrl, topic, subnam
 	defer producer.Close()
 	for i := 0; i < 2; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload:      []byte("producerDelayMsg test" ),
+			Payload:      []byte("producerDelayMsg functions-demo" ),
 			DeliverAfter: 3 * time.Second,
 		}); err != nil {
 			log.Fatal(err)
@@ -417,7 +420,7 @@ func producerDelayAbsolute(secretId, secretKey, uin, region, brokerUrl, topic, s
 	defer producer.Close()
 	for i := 0; i < 2; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload:   []byte("producerDelayAbsolute test" ),
+			Payload:   []byte("producerDelayAbsolute functions-demo" ),
 			DeliverAt: time.Now().Add(3 * time.Second),
 		}); err != nil {
 			log.Fatal(err)
@@ -480,7 +483,7 @@ func consumerShardModel(secretId, secretKey, uin, region, brokerUrl, topic, subn
 	defer producer.Close()
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerShardModel test"),
+			Payload: []byte("consumerShardModel functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -551,7 +554,7 @@ func consumerExclusiveModel(secretId, secretKey, uin, region, brokerUrl, topic, 
 	defer producer.Close()
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerExclusiveModel test"),
+			Payload: []byte("consumerExclusiveModel functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -623,7 +626,7 @@ func consumerFailoverModel(secretId, secretKey, uin, region, brokerUrl, topic, s
 	defer producer.Close()
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerFailoverModel test"),
+			Payload: []byte("consumerFailoverModel functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -693,7 +696,7 @@ func producerMsg(secretId, secretKey, uin, region, brokerUrl, topic, subname str
 	defer producer.Close()
 	for {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("producerMsg test"),
+			Payload: []byte("producerMsg functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -768,7 +771,7 @@ func consumerReader(secretId, secretKey, uin, region, brokerUrl, topic, subname 
 	defer producer.Close()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerReader test"),
+			Payload: []byte("consumerReader functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -820,7 +823,7 @@ func consumerReaderOnSpecificMessage(secretId, secretKey, uin, region, brokerUrl
 	msgIDs := [10]pulsar.MessageID{}
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerReaderOnSpecificMessage test"),
+			Payload: []byte("consumerReaderOnSpecificMessage functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -872,7 +875,7 @@ func consumerEarliestMessageID(secretId, secretKey, uin, region, brokerUrl, topi
 	defer producer.Close()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerEarliestMessageID test"),
+			Payload: []byte("consumerEarliestMessageID functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -928,7 +931,7 @@ func consumerTopics(secretId, secretKey, uin, region, brokerUrl, topic, subname,
 	ctx := context.Background()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(ctx, &pulsar.ProducerMessage{
-			Payload: []byte("consumerTopics test"),
+			Payload: []byte("consumerTopics functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1002,7 +1005,7 @@ func consumerPattern(secretId, secretKey, uin, region, brokerUrl, topic, subname
 	ctx := context.Background()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(ctx, &pulsar.ProducerMessage{
-			Payload: []byte("consumerPattern test"),
+			Payload: []byte("consumerPattern functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1056,7 +1059,7 @@ func consumerTimeout(secretId, secretKey, uin, region, brokerUrl, topic, subname
 	ctx := context.Background()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(ctx, &pulsar.ProducerMessage{
-			Payload: []byte("consumerTimeout test"),
+			Payload: []byte("consumerTimeout functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1110,7 +1113,7 @@ func consumerTag(secretId, secretKey, uin, region, brokerUrl, topic, subname str
 	defer producer.Close()
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerTag tag-A test"),
+			Payload: []byte("consumerTag tag-A functions-demo"),
 			Tags:    []string{"tag-A"},
 		}); err != nil {
 			log.Fatal(err)
@@ -1121,7 +1124,7 @@ func consumerTag(secretId, secretKey, uin, region, brokerUrl, topic, subname str
 
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerTag tag-B test"),
+			Payload: []byte("consumerTag tag-B functions-demo"),
 			Tags:    []string{"tag-B"},
 		}); err != nil {
 			log.Fatal(err)
@@ -1178,8 +1181,8 @@ func consumerKey(secretId, secretKey, uin, region, brokerUrl, topic, subname str
 
 	for i := 0; i < 1; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerKey test"),
-			Key:     "tdmq-key-test",
+			Payload: []byte("consumerKey functions-demo"),
+			Key:     "tdmq-key-functions-demo",
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1235,7 +1238,7 @@ func producerBatchMessages(secretId, secretKey, uin, region, brokerUrl, topic, s
 	defer producer.Close()
 	for i := 0; i < numOfMessages; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("producerBatchMessages test"),
+			Payload: []byte("producerBatchMessages functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1289,7 +1292,7 @@ func consumerSeekByMessageID(secretId, secretKey, uin, region, brokerUrl, topic,
 	var seekID pulsar.MessageID
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerSeekByMessageID test"),
+			Payload: []byte("consumerSeekByMessageID functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1358,7 +1361,7 @@ func consumerSeekByTime(secretId, secretKey, uin, region, brokerUrl, topic, subn
 	defer producer.Close()
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerSeekByTime test"),
+			Payload: []byte("consumerSeekByTime functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1426,7 +1429,7 @@ func consumerAckID(secretId, secretKey, uin, region, brokerUrl, topic, subname s
 	msgIDs := [2]pulsar.MessageID{}
 	for i := 0; i < 2; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerAckID test"),
+			Payload: []byte("consumerAckID functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1481,7 +1484,7 @@ func consumerNack(secretId, secretKey, uin, region, brokerUrl, topic, subname st
 	defer producer.Close()
 	for i := 0; i < 20; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerNack test"),
+			Payload: []byte("consumerNack functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1625,7 +1628,7 @@ func consumerDLQTopic(secretId, secretKey, uin, region, brokerUrl, topic, subnam
 	defer producer.Close()
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerDLQ test"),
+			Payload: []byte("consumerDLQ functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1717,7 +1720,7 @@ func consumerRetryTopic(secretId, secretKey, uin, region, brokerUrl, topic, subn
 	defer producer.Close()
 	for i := 0; i < 10; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerRetryTopic test"),
+			Payload: []byte("consumerRetryTopic functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
@@ -1767,7 +1770,7 @@ func consumerPartions(secretId, secretKey, uin, region, brokerUrl, topic, subnam
 	}
 }
 
-func consumerRegexTopic(secretId, secretKey, uin, region, brokerUrl, topic, subname, regexTopicPattern string) {
+func vpcNetModel(secretId, secretKey, uin, region, brokerUrl, topic, subname, netModel string, num int) {
 	authParams := make(map[string]string)
 	authParams["secretId"] = secretId
 	authParams["secretKey"] = secretKey
@@ -1777,6 +1780,7 @@ func consumerRegexTopic(secretId, secretKey, uin, region, brokerUrl, topic, subn
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
 		URL:       brokerUrl,
 		AuthCloud: pulsar.NewAuthenticationCloudCam(authParams),
+		NetModel:  netModel,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -1791,31 +1795,30 @@ func consumerRegexTopic(secretId, secretKey, uin, region, brokerUrl, topic, subn
 		log.Fatal(err)
 	}
 	defer producer.Close()
-
 	consumer, err := client.Subscribe(pulsar.ConsumerOptions{
-		TopicsPattern:       regexTopicPattern,
-		AutoDiscoveryPeriod: 0,
-		SubscriptionName:    subname,
+		Topic:            topic,
+		SubscriptionName: subname,
+		Type:             pulsar.Shared,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer consumer.Close()
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < num; i++ {
 		if msgId, err := producer.Send(context.Background(), &pulsar.ProducerMessage{
-			Payload: []byte("consumerRetryTopic test"),
+			Payload: []byte(" functions-demo"),
 		}); err != nil {
 			log.Fatal(err)
 		} else {
-			fmt.Printf("Published consumerRetryTopic message: %s\n", msgId)
+			fmt.Printf("Published message: %s\n", msgId)
 		}
-	}
 
-	for i := 0; i < 10; i++ {
-		msg, _ := consumer.Receive(context.Background())
-		fmt.Printf("ReconsumeLater msgId: %#v -- content: '%s', --topic:'%v'\n", msg.ID(), string(msg.Payload()), msg.Topic())
-		//consumer.ReconsumeLater(msg, pulsar.NewReconsumeOptionsWithLevel(1))
+		msg, err := consumer.Receive(context.Background())
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Printf("Received message msgId: %#v -- content: '%s'\n", msg.ID(), string(msg.Payload()))
 		consumer.Ack(msg)
 	}
 }
@@ -1897,9 +1900,10 @@ func main() {
 		var dlqtopic string = os.Args[9]
 		var retrytopic string = os.Args[10]
 		consumerRetryTopic(secretId, secretKey, uin, region, brokerUrl, topic, subname, dlqtopic, retrytopic)
-	} else if casesence == "" {
-		var regexTopicPattern string = os.Args[9]
-		consumerRegexTopic(secretId, secretKey, uin, region, brokerUrl, topic, subname, regexTopicPattern)
+	} else if casesence == "vpcNetModel" {
+		var netModel string = os.Args[9]
+		num, _ := strconv.Atoi(os.Args[10])
+		vpcNetModel(secretId, secretKey, uin, region, brokerUrl, topic, subname, netModel, num)
 	} else {
 		producerMsg(secretId, secretKey, uin, region, brokerUrl, topic, subname)
 	}
