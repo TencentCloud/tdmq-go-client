@@ -20,6 +20,7 @@ package pulsar
 import (
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/auth"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/authcloud"
+	"net/url"
 	"time"
 )
 
@@ -109,6 +110,8 @@ type ClientOptions struct {
 
 	// Max number of connections to a single broker that will kept in the pool. (Default: 1 connection)
 	MaxConnectionsPerBroker int
+
+	PatchConnURL func(*url.URL)
 }
 
 type Client interface {
