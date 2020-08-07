@@ -371,6 +371,10 @@ func (id *myMessageID) Serialize() []byte {
 	return id.data
 }
 
+func (id *myMessageID) String() string {
+	return string(id.data)
+}
+
 func TestReaderOnSpecificMessageWithCustomMessageID(t *testing.T) {
 	client, err := NewClient(ClientOptions{
 		URL: lookupURL,

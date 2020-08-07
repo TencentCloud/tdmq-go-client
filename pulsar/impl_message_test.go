@@ -36,6 +36,8 @@ func TestMessageId(t *testing.T) {
 	assert.Equal(t, int32(3), id2.(*messageID).batchIdx)
 	assert.Equal(t, int32(4), id2.(*messageID).partitionIdx)
 
+	assert.Equal(t, id.String(), "1-2-3-4")
+
 	id, err = DeserializeMessageID(nil)
 	assert.Error(t, err)
 	assert.Nil(t, id)
