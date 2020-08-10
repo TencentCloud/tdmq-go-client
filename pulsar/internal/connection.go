@@ -66,7 +66,7 @@ type ConnectionListener interface {
 	ConnectionClosed()
 }
 
-// Connection is a interface of clientOptions cnx.
+// Connection is a interface of client cnx.
 type Connection interface {
 	SendRequest(requestID uint64, req *pb.BaseCommand, callback func(*pb.BaseCommand, error))
 	SendRequestNoWait(req *pb.BaseCommand)

@@ -111,7 +111,7 @@ func newConsumer(client *client, options ConsumerOptions) (Consumer, error) {
 				options.DLQ.Topic = deadLetterTopic
 			}
 		}
-		options.Topics = append(options.Topics, retryLetterTopic)
+		options.Topics = append(options.Topics, options.DLQ.RetryTopic)
 		if options.DelayLevelUtil == nil {
 			options.DelayLevelUtil = NewDelayLevelUtil(DefaultMessageDelayLevel)
 		}

@@ -272,7 +272,7 @@ func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptio
 	delayTime := reconsumeOptions.DelayTime()
 	if reconsumeOptions.DelayLevel() == -2 {
 		if v, ok := propertiesMap["DELAY"]; ok {
-			delayLevels, _ := strconv.Atoi(v)
+			delayLevels, _ = strconv.Atoi(v)
 			if delayLevels == -1 {
 				delayLevels = 1
 			} else {
@@ -335,6 +335,7 @@ func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptio
 }
 
 func (pc *partitionConsumer) internalReconsumeAsync(prod Producer, originalMsg Message, producerMsg *ProducerMessage, desType string, callback func(MessageID, *ProducerMessage, error)) {
+	log.Info(producerMsg.DeliverAfter)
 	prod.SendAsync(context.Background(),
 		producerMsg,
 		func(msgId MessageID, producerMsg *ProducerMessage, e error) {

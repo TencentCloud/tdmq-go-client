@@ -52,7 +52,7 @@ func newMultiTopicConsumer(client *client, options ConsumerOptions, topics []str
 		consumers: make(map[string]Consumer, len(topics)),
 		closeCh:   make(chan struct{}),
 		dlq:       dlq,
-		log:       &log.Entry{Logger: log.New()},
+		log:       &log.Entry{},
 	}
 
 	var errs error
