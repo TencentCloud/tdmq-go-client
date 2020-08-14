@@ -113,11 +113,6 @@ func newClient(options ClientOptions) (Client, error) {
 		operationTimeout = defaultOperationTimeout
 	}
 
-
-	if options.NetModel == "" {
-		options.NetModel = NetmodelVpcPulsar
-	}
-
 	maxConnectionsPerHost := options.MaxConnectionsPerBroker
 	if maxConnectionsPerHost <= 0 {
 		maxConnectionsPerHost = 1
@@ -125,10 +120,10 @@ func newClient(options ClientOptions) (Client, error) {
 
 	c := &client{
 		options: &options,
-		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout,maxConnectionsPerHost),
+		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout, maxConnectionsPerHost),
 	}
 	c.rpcClient = internal.NewRPCClient(url, c.cnxPool, operationTimeout)
-	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil)
+	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil, options.NetModel)
 	c.handlers = internal.NewClientHandlers()
 	return c, nil
 }
@@ -170,7 +165,6 @@ func (c *client) TopicPartitions(topic string) ([]string, error) {
 		&pb.CommandPartitionedTopicMetadata{
 			RequestId: &id,
 			Topic:     &topicName.Name,
-			NetModel:  &c.options.NetModel,
 		})
 	if err != nil {
 		return nil, err
@@ -205,7 +199,6 @@ func (c *client) namespaceTopics(namespace string) ([]string, error) {
 		RequestId: proto.Uint64(id),
 		Namespace: proto.String(namespace),
 		Mode:      pb.CommandGetTopicsOfNamespace_PERSISTENT.Enum(),
-		NetModel:  proto.String(c.options.NetModel),
 	}
 	res, err := c.rpcClient.RequestToAnyBroker(id, pb.BaseCommand_GET_TOPICS_OF_NAMESPACE, req)
 	if err != nil {

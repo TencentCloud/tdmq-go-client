@@ -941,7 +941,7 @@ func (pc *partitionConsumer) reconnectToBroker() {
 }
 
 func (pc *partitionConsumer) grabConn() error {
-	lr, err := pc.client.lookupService.NetModelLookup(pc.topic, pc.client.options.NetModel)
+	lr, err := pc.client.lookupService.Lookup(pc.topic)
 	if err != nil {
 		pc.log.WithError(err).Warn("Failed to lookup topic")
 		return err

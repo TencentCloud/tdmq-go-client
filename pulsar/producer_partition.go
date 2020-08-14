@@ -37,7 +37,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 const (
@@ -164,7 +164,7 @@ func newPartitionProducer(client *client, topic string, options *ProducerOptions
 }
 
 func (p *partitionProducer) grabCnx() error {
-	lr, err := p.client.lookupService.NetModelLookup(p.topic, p.client.options.NetModel)
+	lr, err := p.client.lookupService.Lookup(p.topic)
 	if err != nil {
 		p.log.WithError(err).Warn("Failed to lookup topic")
 		return err
