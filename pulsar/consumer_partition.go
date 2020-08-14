@@ -386,7 +386,7 @@ func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptio
 }
 
 func (pc *partitionConsumer) internalReconsumeAsync(prod Producer, originalMsg Message, producerMsg *ProducerMessage, desType string, callback func(MessageID, *ProducerMessage, error)) {
-	log.Info(producerMsg.DeliverAfter)
+	//log.Info(producerMsg.DeliverAfter)
 	prod.SendAsync(context.Background(),
 		producerMsg,
 		func(msgId MessageID, producerMsg *ProducerMessage, e error) {
