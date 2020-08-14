@@ -23,9 +23,20 @@ import (
 	"net/url"
 
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
+)
+
+var (
+	lookupRequestsCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_lookup_count",
+		Help: "Counter of lookup requests made by the client",
+	})
 )
 
 // LookupResult encapsulates a struct for lookup a request, containing two parts: LogicalAddr, PhysicalAddr.
@@ -84,6 +95,7 @@ func (ls *lookupService) getBrokerAddress(lr *pb.CommandLookupTopicResponse) (lo
 const lookupResultMaxRedirect = 20
 
 func (ls *lookupService) Lookup(topic string) (*LookupResult, error) {
+	lookupRequestsCount.Inc()
 	id := ls.rpcClient.NewRequestID()
 	res, err := ls.rpcClient.RequestToAnyBroker(id, pb.BaseCommand_LOOKUP, &pb.CommandLookupTopic{
 		RequestId:     &id,

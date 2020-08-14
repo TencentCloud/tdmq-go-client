@@ -27,6 +27,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
@@ -34,6 +37,49 @@ import (
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+)
+
+var (
+	messagesReceived = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_messages_received",
+		Help: "Counter of messages received by the client",
+	})
+
+	bytesReceived = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_bytes_received",
+		Help: "Counter of bytes received by the client",
+	})
+
+	prefetchedMessages = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pulsar_client_consumer_prefetched_messages",
+		Help: "Number of messages currently sitting in the consumer pre-fetch queue",
+	})
+
+	prefetchedBytes = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pulsar_client_consumer_prefetched_bytes",
+		Help: "Total number of bytes currently sitting in the consumer pre-fetch queue",
+	})
+
+	acksCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_consumer_acks",
+		Help: "Counter of messages acked by client",
+	})
+
+	nacksCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_consumer_nacks",
+		Help: "Counter of messages nacked by client",
+	})
+
+	dlqCounter = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_consumer_dlq_messages",
+		Help: "Counter of messages sent to Dead letter queue",
+	})
+
+	processingTime = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name:    "pulsar_client_consumer_processing_time_seconds",
+		Help:    "Time it takes for application to process messages",
+		Buckets: []float64{.0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
+	})
 )
 
 type consumerState int
@@ -67,18 +113,21 @@ type partitionConsumerOpts struct {
 	nackRedeliveryDelay        time.Duration
 	metadata                   map[string]string
 	replicateSubscriptionState bool
-	startMessageID             *messageID
+	startMessageID             trackingMessageID
 	startMessageIDInclusive    bool
 	subscriptionMode           subscriptionMode
 	readCompacted              bool
 	disableForceTopicCreation  bool
-	delayLevelUtil             DelayLevelUtil
+
+	delayLevelUtil DelayLevelUtil
 
 	// For Tencent TDMQ tag
 	tagMapTopicNames        map[string]string
 	tagPatternMapTopicNames map[string]string
 
 	netModel string
+
+	interceptors ConsumerInterceptors
 }
 
 type partitionConsumer struct {
@@ -108,13 +157,13 @@ type partitionConsumer struct {
 	// the size of the queue channel for buffering messages
 	queueSize       int32
 	queueCh         chan []*message
-	startMessageID  *messageID
-	lastDequeuedMsg *messageID
+	startMessageID  trackingMessageID
+	lastDequeuedMsg trackingMessageID
 
 	eventsCh     chan interface{}
 	connectedCh  chan struct{}
 	closeCh      chan struct{}
-	clearQueueCh chan func(id *messageID)
+	clearQueueCh chan func(id trackingMessageID)
 
 	nackTracker *negativeAcksTracker
 	dlq         *dlqRouter
@@ -144,13 +193,15 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 		connectedCh:          make(chan struct{}),
 		messageCh:            messageCh,
 		closeCh:              make(chan struct{}),
-		clearQueueCh:         make(chan func(id *messageID)),
+		clearQueueCh:         make(chan func(id trackingMessageID)),
 		compressionProviders: make(map[pb.CompressionType]compression.Provider),
 		dlq:                  dlq,
 		log:                  log.WithField("topic", options.topic),
 		netModel:             options.netModel,
 	}
-	pc.log = pc.log.WithField("name", pc.name).WithField("subscription", options.subscription)
+	pc.log = pc.log.WithField("name", pc.name).
+		WithField("subscription", options.subscription).
+		WithField("consumerID", pc.consumerID)
 	pc.nackTracker = newNegativeAcksTracker(pc, options.nackRedeliveryDelay)
 
 	// For Tencent TDMQ tag
@@ -223,7 +274,7 @@ func (pc *partitionConsumer) internalUnsubscribe(unsub *unsubscribeRequest) {
 	pc.state = consumerClosed
 }
 
-func (pc *partitionConsumer) getLastMessageID() (*messageID, error) {
+func (pc *partitionConsumer) getLastMessageID() (trackingMessageID, error) {
 	req := &getLastMsgIDRequest{doneCh: make(chan struct{})}
 	pc.eventsCh <- req
 
@@ -340,29 +391,41 @@ func (pc *partitionConsumer) internalReconsumeAsync(prod Producer, originalMsg M
 		producerMsg,
 		func(msgId MessageID, producerMsg *ProducerMessage, e error) {
 			pc.log.WithField("msgID", originalMsg.(*message).ID()).Debug("Sent message to " + desType + " Topic")
-			pc.AckID(originalMsg.(*message).ID().(*messageID))
-			pc.nackTracker.Del(originalMsg.(*message).ID().(*messageID))
+			pc.AckID(originalMsg.(*message).ID().(trackingMessageID))
+			pc.nackTracker.Del(originalMsg.(*message).ID().(trackingMessageID))
 			if callback != nil {
 				callback(msgId, producerMsg, e)
 			}
 		})
 }
 
-func (pc *partitionConsumer) AckID(msgID *messageID) {
-	if msgID != nil && msgID.ack() {
+func (pc *partitionConsumer) AckID(msgID trackingMessageID) {
+	if !msgID.Undefined() && msgID.ack() {
+
+		acksCounter.Inc()
+		processingTime.Observe(float64(time.Now().UnixNano()-msgID.receivedTime.UnixNano()) / 1.0e9)
 		req := &ackRequest{
 			msgID: msgID,
 		}
 		pc.eventsCh <- req
+
+		pc.options.interceptors.OnAcknowledge(pc.parentConsumer, msgID)
 	}
 }
 
-func (pc *partitionConsumer) NackID(msgID *messageID) {
-	pc.nackTracker.Add(msgID)
+func (pc *partitionConsumer) NackID(msgID trackingMessageID) {
+	pc.nackTracker.Add(msgID.messageID)
+	nacksCounter.Inc()
 }
 
 func (pc *partitionConsumer) Redeliver(msgIds []messageID) {
 	pc.eventsCh <- &redeliveryRequest{msgIds}
+
+	iMsgIds := make([]MessageID, len(msgIds))
+	for i := range iMsgIds {
+		iMsgIds[i] = &msgIds[i]
+	}
+	pc.options.interceptors.OnNegativeAcksSend(pc.parentConsumer, iMsgIds)
 }
 
 func (pc *partitionConsumer) internalRedeliver(req *redeliveryRequest) {
@@ -396,7 +459,7 @@ func (pc *partitionConsumer) Close() {
 	<-req.doneCh
 }
 
-func (pc *partitionConsumer) Seek(msgID *messageID) error {
+func (pc *partitionConsumer) Seek(msgID trackingMessageID) error {
 	req := &seekRequest{
 		doneCh: make(chan struct{}),
 		msgID:  msgID,
@@ -434,6 +497,8 @@ func (pc *partitionConsumer) internalSeek(seek *seekRequest) {
 	if err != nil {
 		pc.log.WithError(err).Error("Failed to reset to message id")
 		seek.err = err
+	} else {
+		pc.clearMessageCh()
 	}
 }
 
@@ -468,6 +533,19 @@ func (pc *partitionConsumer) internalSeekByTime(seek *seekByTimeRequest) {
 	if err != nil {
 		pc.log.WithError(err).Error("Failed to reset to message publish time")
 		seek.err = err
+	}else{
+		pc.clearMessageCh()
+	}
+}
+
+func (pc *partitionConsumer) clearMessageCh() {
+Label:
+	for ; ; {
+		select {
+		case <-pc.messageCh:
+		default:
+			break Label
+		}
 	}
 }
 
@@ -518,12 +596,19 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 	if numMsgs > 1 {
 		ackTracker = newAckTracker(numMsgs)
 	}
+
+	messagesReceived.Add(float64(numMsgs))
+	prefetchedMessages.Add(float64(numMsgs))
+
 	for i := 0; i < numMsgs; i++ {
 		smm, payload, err := reader.ReadMessage()
 		if err != nil {
 			pc.discardCorruptedMessage(pbMsgID, pb.CommandAck_BatchDeSerializeError)
 			return err
 		}
+
+		bytesReceived.Add(float64(len(payload)))
+		prefetchedBytes.Add(float64(len(payload)))
 
 		msgID := newTrackingMessageID(
 			int64(pbMsgID.GetLedgerId()),
@@ -570,6 +655,11 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 			}
 		}
 
+		pc.options.interceptors.BeforeConsume(ConsumerMessage{
+			Consumer: pc.parentConsumer,
+			Message:  msg,
+		})
+
 		messages = append(messages, msg)
 	}
 
@@ -578,17 +668,17 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 	return nil
 }
 
-func (pc *partitionConsumer) messageShouldBeDiscarded(msgID *messageID) bool {
-	if pc.startMessageID == nil {
+func (pc *partitionConsumer) messageShouldBeDiscarded(msgID trackingMessageID) bool {
+	if pc.startMessageID.Undefined() {
 		return false
 	}
 
 	if pc.options.startMessageIDInclusive {
-		return pc.startMessageID.greater(msgID)
+		return pc.startMessageID.greater(msgID.messageID)
 	}
 
 	// Non inclusive
-	return pc.startMessageID.greaterEqual(msgID)
+	return pc.startMessageID.greaterEqual(msgID.messageID)
 }
 
 func (pc *partitionConsumer) ConnectionClosed() {
@@ -635,11 +725,15 @@ func (pc *partitionConsumer) dispatcher() {
 
 			if pc.dlq.shouldSendToDlq(&nextMessage) {
 				// pass the message to the DLQ router
+				dlqCounter.Inc()
 				messageCh = pc.dlq.Chan()
 			} else {
 				// pass the message to application channel
 				messageCh = pc.messageCh
 			}
+
+			prefetchedMessages.Dec()
+			prefetchedBytes.Sub(float64(len(messages[0].payLoad)))
 		} else {
 			// we are ready for more messages
 			queueCh = pc.queueCh
@@ -675,7 +769,7 @@ func (pc *partitionConsumer) dispatcher() {
 			// in the previous batch
 			messages = msgs
 
-		// if the messageCh is nil or the messageCh is full this will not be selected
+			// if the messageCh is nil or the messageCh is full this will not be selected
 		case messageCh <- nextMessage:
 			// allow this message to be garbage collected
 			messages[0] = nil
@@ -699,7 +793,7 @@ func (pc *partitionConsumer) dispatcher() {
 		case clearQueueCb := <-pc.clearQueueCh:
 			// drain the message queue on any new connection by sending a
 			// special nil message to the channel so we know when to stop dropping messages
-			var nextMessageInQueue *messageID
+			var nextMessageInQueue trackingMessageID
 			go func() {
 				pc.queueCh <- nil
 			}()
@@ -707,8 +801,8 @@ func (pc *partitionConsumer) dispatcher() {
 				// the queue has been drained
 				if m == nil {
 					break
-				} else if nextMessageInQueue == nil {
-					nextMessageInQueue = m[0].msgID.(*messageID)
+				} else if nextMessageInQueue.Undefined() {
+					nextMessageInQueue = m[0].msgID.(trackingMessageID)
 				}
 			}
 
@@ -718,7 +812,7 @@ func (pc *partitionConsumer) dispatcher() {
 }
 
 type ackRequest struct {
-	msgID *messageID
+	msgID trackingMessageID
 }
 
 type unsubscribeRequest struct {
@@ -736,13 +830,13 @@ type redeliveryRequest struct {
 
 type getLastMsgIDRequest struct {
 	doneCh chan struct{}
-	msgID  *messageID
+	msgID  trackingMessageID
 	err    error
 }
 
 type seekRequest struct {
 	doneCh chan struct{}
-	msgID  *messageID
+	msgID  trackingMessageID
 	err    error
 }
 
@@ -935,15 +1029,15 @@ func (pc *partitionConsumer) grabConn() error {
 	}
 }
 
-func (pc *partitionConsumer) clearQueueAndGetNextMessage() *messageID {
+func (pc *partitionConsumer) clearQueueAndGetNextMessage() trackingMessageID {
 	if pc.state != consumerReady {
-		return nil
+		return trackingMessageID{}
 	}
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
-	var msgID *messageID
+	var msgID trackingMessageID
 
-	pc.clearQueueCh <- func(id *messageID) {
+	pc.clearQueueCh <- func(id trackingMessageID) {
 		msgID = id
 		wg.Done()
 	}
@@ -956,12 +1050,12 @@ func (pc *partitionConsumer) clearQueueAndGetNextMessage() *messageID {
  * Clear the internal receiver queue and returns the message id of what was the 1st message in the queue that was
  * not seen by the application
  */
-func (pc *partitionConsumer) clearReceiverQueue() *messageID {
+func (pc *partitionConsumer) clearReceiverQueue() trackingMessageID {
 	nextMessageInQueue := pc.clearQueueAndGetNextMessage()
 
-	if nextMessageInQueue != nil {
+	if !nextMessageInQueue.Undefined() {
 		return getPreviousMessage(nextMessageInQueue)
-	} else if pc.lastDequeuedMsg != nil {
+	} else if !pc.lastDequeuedMsg.Undefined() {
 		// If the queue was empty we need to restart from the message just after the last one that has been dequeued
 		// in the past
 		return pc.lastDequeuedMsg
@@ -971,22 +1065,32 @@ func (pc *partitionConsumer) clearReceiverQueue() *messageID {
 	}
 }
 
-func getPreviousMessage(mid *messageID) *messageID {
+func getPreviousMessage(mid trackingMessageID) trackingMessageID {
 	if mid.batchIdx >= 0 {
-		return &messageID{
-			ledgerID:     mid.ledgerID,
-			entryID:      mid.entryID,
-			batchIdx:     mid.batchIdx - 1,
-			partitionIdx: mid.partitionIdx,
+		return trackingMessageID{
+			messageID: messageID{
+				ledgerID:     mid.ledgerID,
+				entryID:      mid.entryID,
+				batchIdx:     mid.batchIdx - 1,
+				partitionIdx: mid.partitionIdx,
+			},
+			tracker:      mid.tracker,
+			consumer:     mid.consumer,
+			receivedTime: mid.receivedTime,
 		}
 	}
 
 	// Get on previous message in previous entry
-	return &messageID{
-		ledgerID:     mid.ledgerID,
-		entryID:      mid.entryID - 1,
-		batchIdx:     mid.batchIdx,
-		partitionIdx: mid.partitionIdx,
+	return trackingMessageID{
+		messageID: messageID{
+			ledgerID:     mid.ledgerID,
+			entryID:      mid.entryID - 1,
+			batchIdx:     mid.batchIdx,
+			partitionIdx: mid.partitionIdx,
+		},
+		tracker:      mid.tracker,
+		consumer:     mid.consumer,
+		receivedTime: mid.receivedTime,
 	}
 }
 
@@ -1010,8 +1114,7 @@ func (pc *partitionConsumer) Decompress(msgMeta *pb.MessageMetadata, payload int
 	return internal.NewBufferWrapper(uncompressed), nil
 }
 
-func (pc *partitionConsumer) initializeCompressionProvider(
-	compressionType pb.CompressionType) (compression.Provider, error) {
+func (pc *partitionConsumer) initializeCompressionProvider(compressionType pb.CompressionType) (compression.Provider, error) {
 	switch compressionType {
 	case pb.CompressionType_NONE:
 		return compression.NewNoopProvider(), nil
@@ -1026,8 +1129,7 @@ func (pc *partitionConsumer) initializeCompressionProvider(
 	return nil, fmt.Errorf("unsupported compression type: %v", compressionType)
 }
 
-func (pc *partitionConsumer) discardCorruptedMessage(msgID *pb.MessageIdData,
-	validationError pb.CommandAck_ValidationError) {
+func (pc *partitionConsumer) discardCorruptedMessage(msgID *pb.MessageIdData, validationError pb.CommandAck_ValidationError) {
 	pc.log.WithFields(log.Fields{
 		"msgID":           msgID,
 		"validationError": validationError,
@@ -1042,8 +1144,8 @@ func (pc *partitionConsumer) discardCorruptedMessage(msgID *pb.MessageIdData,
 		})
 }
 
-func convertToMessageIDData(msgID *messageID) *pb.MessageIdData {
-	if msgID == nil {
+func convertToMessageIDData(msgID trackingMessageID) *pb.MessageIdData {
+	if msgID.Undefined() {
 		return nil
 	}
 
@@ -1053,16 +1155,17 @@ func convertToMessageIDData(msgID *messageID) *pb.MessageIdData {
 	}
 }
 
-func convertToMessageID(id *pb.MessageIdData) *messageID {
+func convertToMessageID(id *pb.MessageIdData) trackingMessageID {
 	if id == nil {
-		return nil
+		return trackingMessageID{}
 	}
 
-	msgID := &messageID{
-		ledgerID: int64(*id.LedgerId),
-		entryID:  int64(*id.EntryId),
+	msgID := trackingMessageID{
+		messageID: messageID{
+			ledgerID: int64(*id.LedgerId),
+			entryID:  int64(*id.EntryId),
+		},
 	}
-
 	if id.BatchIndex != nil {
 		msgID.batchIdx = *id.BatchIndex
 	}

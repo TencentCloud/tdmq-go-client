@@ -24,9 +24,29 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	log "github.com/sirupsen/logrus"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
+)
+
+var (
+	producersOpened = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_producers_opened",
+		Help: "Counter of producers created by the client",
+	})
+
+	producersClosed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_producers_closed",
+		Help: "Counter of producers closed by the client",
+	})
+
+	producersPartitions = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "pulsar_client_producers_partitions_active",
+		Help: "Counter of individual partitions the producers are currently active",
+	})
 )
 
 type producer struct {
@@ -39,6 +59,7 @@ type producer struct {
 	numPartitions uint32
 	messageRouter func(*ProducerMessage, TopicMetadata) int
 	ticker        *time.Ticker
+	tickerStop    chan struct{}
 
 	log *log.Entry
 }
@@ -77,6 +98,10 @@ func newProducer(client *client, options *ProducerOptions) (*producer, error) {
 		batchingMaxPublishDelay = defaultBatchingMaxPublishDelay
 	}
 
+	if options.Interceptors == nil {
+		options.Interceptors = defaultProducerInterceptors
+	}
+
 	if options.MessageRouter == nil {
 		internalRouter := internal.NewDefaultRouter(
 			internal.NewSystemClock(),
@@ -94,15 +119,23 @@ func newProducer(client *client, options *ProducerOptions) (*producer, error) {
 		return nil, err
 	}
 
-	p.ticker = time.NewTicker(partitionsAutoDiscoveryInterval)
+	ticker := time.NewTicker(partitionsAutoDiscoveryInterval)
+	p.ticker = ticker
+	p.tickerStop = make(chan struct{})
 
 	go func() {
-		for range p.ticker.C {
-			p.log.Debug("Auto discovering new partitions")
-			p.internalCreatePartitionsProducers()
+		for {
+			select {
+			case <-ticker.C:
+				p.log.Debug("Auto discovering new partitions")
+				p.internalCreatePartitionsProducers()
+			case <-p.tickerStop:
+				return
+			}
 		}
 	}()
 
+	producersOpened.Inc()
 	return p, nil
 }
 
@@ -182,6 +215,7 @@ func (p *producer) internalCreatePartitionsProducers() error {
 		return err
 	}
 
+	producersPartitions.Add(float64(partitionsToAdd))
 	atomic.StorePointer(&p.producersPtr, unsafe.Pointer(&p.producers))
 	atomic.StoreUint32(&p.numPartitions, uint32(len(p.producers)))
 	return nil
@@ -256,10 +290,14 @@ func (p *producer) Close() {
 	defer p.RUnlock()
 	if p.ticker != nil {
 		p.ticker.Stop()
+		close(p.tickerStop)
+		p.ticker = nil
 	}
 
 	for _, pp := range p.producers {
 		pp.Close()
 	}
 	p.client.handlers.Del(p)
+	producersPartitions.Sub(float64(len(p.producers)))
+	producersClosed.Inc()
 }

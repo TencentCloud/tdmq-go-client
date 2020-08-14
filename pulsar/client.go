@@ -62,6 +62,12 @@ func NewAuthenticationAthenz(authParams map[string]string) Authentication {
 	return athenz
 }
 
+func NewAuthenticationOAuth2(authParams map[string]string) Authentication {
+	oauth, _ := auth.NewAuthenticationOAuth2WithParams(authParams)
+	return oauth
+
+}
+
 func NewAuthenticationCloudCam(authParams map[string]string) authcloud.AuthenticationCloud {
 	if authParams == nil || len(authParams) == 0 {
 		return nil

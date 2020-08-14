@@ -25,9 +25,20 @@ import (
 	"time"
 
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
+)
+
+var (
+	rpcRequestCount = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_rpc_count",
+		Help: "Counter of RPC requests made by the client",
+	})
 )
 
 type RPCResult struct {
@@ -81,6 +92,7 @@ func (c *rpcClient) RequestToAnyBroker(requestID uint64, cmdType pb.BaseCommand_
 
 func (c *rpcClient) Request(logicalAddr *url.URL, physicalAddr *url.URL, requestID uint64,
 	cmdType pb.BaseCommand_Type, message proto.Message) (*RPCResult, error) {
+	rpcRequestCount.Inc()
 	cnx, err := c.getConn(logicalAddr, physicalAddr)
 	if err != nil {
 		return nil, err
@@ -132,6 +144,7 @@ func (c *rpcClient) getConn(logicalAddr *url.URL, physicalAddr *url.URL) (Connec
 
 func (c *rpcClient) RequestOnCnx(cnx Connection, requestID uint64, cmdType pb.BaseCommand_Type,
 	message proto.Message) (*RPCResult, error) {
+	rpcRequestCount.Inc()
 	wg := sync.WaitGroup{}
 	wg.Add(1)
 
@@ -151,6 +164,7 @@ func (c *rpcClient) RequestOnCnx(cnx Connection, requestID uint64, cmdType pb.Ba
 }
 
 func (c *rpcClient) RequestOnCnxNoWait(cnx Connection, cmdType pb.BaseCommand_Type, message proto.Message) {
+	rpcRequestCount.Inc()
 	cnx.SendRequestNoWait(baseCommand(cmdType, message))
 }
 

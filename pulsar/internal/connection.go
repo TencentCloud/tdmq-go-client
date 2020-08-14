@@ -33,6 +33,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/gogo/protobuf/proto"
 	log "github.com/sirupsen/logrus"
 
@@ -47,6 +50,28 @@ const (
 	ClientVersionString = "Pulsar Go " + PulsarVersion
 
 	PulsarProtocolVersion = int32(pb.ProtocolVersion_v13)
+)
+
+var (
+	connectionsOpened = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_connections_opened",
+		Help: "Counter of connections created by the client",
+	})
+
+	connectionsClosed = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_connections_closed",
+		Help: "Counter of connections closed by the client",
+	})
+
+	connectionsEstablishmentErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_connections_establishment_errors",
+		Help: "Counter of errors in connections establishment",
+	})
+
+	connectionsHandshakeErrors = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "pulsar_client_connections_handshake_errors",
+		Help: "Counter of errors in connections handshake (eg: authz)",
+	})
 )
 
 type TLSOptions struct {
@@ -87,14 +112,14 @@ type ConsumerHandler interface {
 	ConnectionClosed()
 }
 
-type connectionState int
+type connectionState int32
 
 const (
-	connectionInit connectionState = iota
-	connectionConnecting
-	connectionTCPConnected
-	connectionReady
-	connectionClosed
+	connectionInit         = 0
+	connectionConnecting   = 1
+	connectionTCPConnected = 2
+	connectionReady        = 3
+	connectionClosed       = 4
 )
 
 func (s connectionState) String() string {
@@ -130,7 +155,7 @@ type incomingCmd struct {
 type connection struct {
 	sync.Mutex
 	cond              *sync.Cond
-	state             connectionState
+	state             int32
 	connectionTimeout time.Duration
 
 	logicalAddr  *url.URL
@@ -173,7 +198,7 @@ type connection struct {
 func newConnection(logicalAddr *url.URL, physicalAddr *url.URL, tlsOptions *TLSOptions,
 	connectionTimeout time.Duration, auth auth.Provider) *connection {
 	cnx := &connection{
-		state:                connectionInit,
+		state:                int32(connectionInit),
 		connectionTimeout:    connectionTimeout,
 		logicalAddr:          logicalAddr,
 		physicalAddr:         physicalAddr,
@@ -208,32 +233,8 @@ func newConnection(logicalAddr *url.URL, physicalAddr *url.URL, tlsOptions *TLSO
 func newConnectionAuthCloud(logicalAddr *url.URL, physicalAddr *url.URL, tlsOptions *TLSOptions,
 	connectionTimeout time.Duration, auth auth.Provider,
 	authCloud authcloud.AuthenticationCloud) *connection {
-	cnx := &connection{
-		state:                connectionInit,
-		connectionTimeout:    connectionTimeout,
-		logicalAddr:          logicalAddr,
-		physicalAddr:         physicalAddr,
-		writeBuffer:          NewBuffer(4096),
-		log:                  log.WithField("remote_addr", physicalAddr),
-		pendingReqs:          make(map[uint64]*request),
-		lastDataReceivedTime: time.Now(),
-		pingTicker:           time.NewTicker(keepAliveInterval),
-		pingCheckTicker:      time.NewTicker(keepAliveInterval),
-		tlsOptions:           tlsOptions,
-		auth:                 auth,
-
-		closeCh:            make(chan interface{}),
-		incomingRequestsCh: make(chan *request, 10),
-		incomingCmdCh:      make(chan *incomingCmd, 10),
-
-		writeRequestsCh:    make(chan Buffer, 10),
-		listeners:          make(map[uint64]ConnectionListener),
-		consumerHandlers:   make(map[uint64]ConsumerHandler),
-
-		authCloud: authCloud,
-	}
-	cnx.reader = newConnectionReader(cnx)
-	cnx.cond = sync.NewCond(cnx)
+	cnx := newConnection(logicalAddr,physicalAddr,tlsOptions,connectionTimeout,auth)
+	cnx.authCloud = authCloud
 	return cnx
 }
 
@@ -242,11 +243,14 @@ func (c *connection) start() {
 	go func() {
 		if c.connect() {
 			if c.doHandshake() {
+				connectionsOpened.Inc()
 				c.run()
 			} else {
+				connectionsHandshakeErrors.Inc()
 				c.changeState(connectionClosed)
 			}
 		} else {
+			connectionsEstablishmentErrors.Inc()
 			c.changeState(connectionClosed)
 		}
 	}()
@@ -345,11 +349,8 @@ func (c *connection) doHandshake() bool {
 	c.cnx.SetDeadline(time.Time{})
 
 	if cmd.Connected == nil {
-		c.log.Warnf("Failed to perform initial handshake - Expecting 'Connected' cmd, got '%s'",
-			cmd.Type)
-		if cmd.Error != nil {
-			c.log.Warnf("Error Message :", cmd.Error.GetMessage())
-		}
+		c.log.Warnf("Failed to establish connection with broker: '%s'",
+			cmd.Error.GetMessage())
 		return false
 	}
 	if cmd.Connected.MaxMessageSize != nil {
@@ -430,7 +431,34 @@ func (c *connection) runPingCheck() {
 }
 
 func (c *connection) WriteData(data Buffer) {
-	c.writeRequestsCh <- data
+	select {
+	case c.writeRequestsCh <- data:
+		// Channel is not full
+		return
+
+	default:
+		// Channel full, fallback to probe if connection is closed
+	}
+
+	for {
+		select {
+		case c.writeRequestsCh <- data:
+			// Successfully wrote on the channel
+			return
+
+		case <-time.After(100 * time.Millisecond):
+			// The channel is either:
+			// 1. blocked, in which case we need to wait until we have space
+			// 2. the connection is already closed, then we need to bail out
+			c.log.Debug("Couldn't write on connection channel immediately")
+			state := connectionState(atomic.LoadInt32(&c.state))
+			if state != connectionReady {
+				c.log.Debug("Connection was already closed")
+				return
+			}
+		}
+	}
+
 }
 
 func (c *connection) internalWriteData(data Buffer) {
@@ -669,7 +697,7 @@ func (c *connection) handleCloseConsumer(closeConsumer *pb.CommandCloseConsumer)
 
 	if consumer, ok := c.consumerHandler(consumerID); ok {
 		consumer.ConnectionClosed()
-		delete(c.listeners, consumerID)
+		c.DeleteConsumeHandler(consumerID)
 	} else {
 		c.log.WithField("consumerID", consumerID).Warnf("Consumer with ID not found while closing consumer")
 	}
@@ -756,11 +784,13 @@ func (c *connection) Close() {
 	for _, handler := range consumerHandlers {
 		handler.ConnectionClosed()
 	}
+
+	connectionsClosed.Inc()
 }
 
 func (c *connection) changeState(state connectionState) {
 	c.Lock()
-	c.state = state
+	atomic.StoreInt32(&c.state, int32(state))
 	c.cond.Broadcast()
 	c.Unlock()
 }
