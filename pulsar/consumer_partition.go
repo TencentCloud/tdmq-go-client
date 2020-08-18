@@ -533,7 +533,7 @@ func (pc *partitionConsumer) internalSeekByTime(seek *seekByTimeRequest) {
 	if err != nil {
 		pc.log.WithError(err).Error("Failed to reset to message publish time")
 		seek.err = err
-	}else{
+	} else {
 		pc.clearMessageCh()
 	}
 }
