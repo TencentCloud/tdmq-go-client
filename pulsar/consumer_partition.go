@@ -396,6 +396,7 @@ func (pc *partitionConsumer) internalReconsumeAsync(prod Producer, originalMsg M
 			if callback != nil {
 				callback(msgId, producerMsg, e)
 			}
+			log.Info("[ReconsumerLater]msgId ", msgId)
 		})
 }
 
@@ -533,7 +534,7 @@ func (pc *partitionConsumer) internalSeekByTime(seek *seekByTimeRequest) {
 	if err != nil {
 		pc.log.WithError(err).Error("Failed to reset to message publish time")
 		seek.err = err
-	}else{
+	} else {
 		pc.clearMessageCh()
 	}
 }
