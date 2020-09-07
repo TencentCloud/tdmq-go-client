@@ -27,16 +27,15 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
-	
+
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 

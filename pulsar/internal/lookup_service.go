@@ -22,14 +22,14 @@ import (
 	"fmt"
 	"net/url"
 
-	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
+
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 var (
@@ -60,11 +60,11 @@ type lookupService struct {
 }
 
 // NewLookupService init a lookup service struct and return an object of LookupService.
-func NewLookupService(rpcClient RPCClient, serviceURL *url.URL, tlsEnabled bool, listenerName string) LookupService {
+func NewLookupService(rpcClient RPCClient, serviceURL *url.URL, tlsEnabled bool,listenerName string) LookupService {
 	return &lookupService{
-		rpcClient:    rpcClient,
-		serviceURL:   serviceURL,
-		tlsEnabled:   tlsEnabled,
+		rpcClient:  rpcClient,
+		serviceURL: serviceURL,
+		tlsEnabled: tlsEnabled,
 		listenerName: listenerName,
 	}
 }
@@ -98,9 +98,9 @@ func (ls *lookupService) Lookup(topic string) (*LookupResult, error) {
 	lookupRequestsCount.Inc()
 	id := ls.rpcClient.NewRequestID()
 	res, err := ls.rpcClient.RequestToAnyBroker(id, pb.BaseCommand_LOOKUP, &pb.CommandLookupTopic{
-		RequestId:              &id,
-		Topic:                  &topic,
-		Authoritative:          proto.Bool(false),
+		RequestId:     &id,
+		Topic:         &topic,
+		Authoritative: proto.Bool(false),
 		AdvertisedListenerName: proto.String(ls.listenerName),
 	})
 	if err != nil {
@@ -126,6 +126,7 @@ func (ls *lookupService) Lookup(topic string) (*LookupResult, error) {
 				RequestId:     &id,
 				Topic:         &topic,
 				Authoritative: lr.Authoritative,
+				AdvertisedListenerName: proto.String(ls.listenerName),
 			})
 			if err != nil {
 				return nil, err

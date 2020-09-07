@@ -38,20 +38,6 @@ const (
 	defaultOperationTimeout  = 30 * time.Second
 )
 
-const (
-	NetmodelIntranetPulsar = "INTRANET_PULSAR"
-
-	NetmodelIntranetPulsarSsl = "INTRANET_PULSAR_SSL"
-
-	NetmodelExtranetPulsar = "EXTRANET_PULSAR"
-
-	NetmodelExtenetPulsarSsl = "EXTRANET_PULSAR_SSL"
-
-	NetmodelVpcPulsar = "VPC_PULSAR"
-
-	NetmodelVpcPulsarSsl = "VPC_PULSAR_SSL"
-)
-
 type client struct {
 	// For Tencent TDMQ
 	options *ClientOptions
@@ -120,10 +106,10 @@ func newClient(options ClientOptions) (Client, error) {
 
 	c := &client{
 		options: &options,
-		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout, maxConnectionsPerHost),
+		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout,maxConnectionsPerHost),
 	}
 	c.rpcClient = internal.NewRPCClient(url, c.cnxPool, operationTimeout)
-	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil, options.NetModel)
+	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil,options.NetModel)
 	c.handlers = internal.NewClientHandlers()
 	return c, nil
 }
