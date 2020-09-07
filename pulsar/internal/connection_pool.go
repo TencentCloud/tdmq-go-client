@@ -48,6 +48,7 @@ type connectionPool struct {
 	connectionTimeout time.Duration
 	tlsOptions        *TLSOptions
 	auth              auth.Provider
+	patchConnURL      func(*url.URL)
 
 	maxConnectionsPerHost int32
 	roundRobinCnt         int32
@@ -58,12 +59,14 @@ func NewConnectionPool(
 	tlsOptions *TLSOptions,
 	auth auth.Provider,
 	connectionTimeout time.Duration,
-	maxConnectionsPerHost int) ConnectionPool {
+	maxConnectionsPerHost int,
+	patchConnURL func(*url.URL)) ConnectionPool {
 	return &connectionPool{
 		tlsOptions:            tlsOptions,
 		auth:                  auth,
 		connectionTimeout:     connectionTimeout,
 		maxConnectionsPerHost: int32(maxConnectionsPerHost),
+		patchConnURL:          patchConnURL,
 	}
 }
 
@@ -71,17 +74,23 @@ func NewConnectionPoolWithAuthCloud(
 	authCloud authcloud.AuthenticationCloud,
 	tlsOptions *TLSOptions, auth auth.Provider,
 	connectionTimeout time.Duration,
-	maxConnectionsPerHost int) ConnectionPool {
+	maxConnectionsPerHost int,
+	patchConnURL func(*url.URL)) ConnectionPool {
 	return &connectionPool{
 		authCloud:             authCloud,
 		connectionTimeout:     connectionTimeout,
 		tlsOptions:            tlsOptions,
 		auth:                  auth,
 		maxConnectionsPerHost: int32(maxConnectionsPerHost),
+		patchConnURL:          patchConnURL,
 	}
 }
 
 func (p *connectionPool) GetConnection(logicalAddr *url.URL, physicalAddr *url.URL) (Connection, error) {
+	if p.patchConnURL != nil {
+		p.patchConnURL(physicalAddr)
+	}
+
 	key := p.getMapKey(logicalAddr)
 	cachedCnx, found := p.pool.Load(key)
 	if found {

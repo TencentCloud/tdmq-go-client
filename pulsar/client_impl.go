@@ -113,7 +113,6 @@ func newClient(options ClientOptions) (Client, error) {
 		operationTimeout = defaultOperationTimeout
 	}
 
-
 	if options.NetModel == "" {
 		options.NetModel = NetmodelVpcPulsar
 	}
@@ -125,7 +124,7 @@ func newClient(options ClientOptions) (Client, error) {
 
 	c := &client{
 		options: &options,
-		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout,maxConnectionsPerHost),
+		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout, maxConnectionsPerHost, options.PatchConnURL),
 	}
 	c.rpcClient = internal.NewRPCClient(url, c.cnxPool, operationTimeout)
 	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil)
