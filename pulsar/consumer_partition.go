@@ -198,6 +198,7 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 		dlq:                  dlq,
 		log:                  log.WithField("topic", options.topic),
 		netModel:             options.netModel,
+		metadata:             make(map[string]string),
 	}
 	pc.log = pc.log.WithField("name", pc.name).
 		WithField("subscription", options.subscription).
@@ -540,7 +541,7 @@ func (pc *partitionConsumer) internalSeekByTime(seek *seekByTimeRequest) {
 
 func (pc *partitionConsumer) clearMessageCh() {
 Label:
-	for ; ; {
+	for {
 		select {
 		case <-pc.messageCh:
 		default:
