@@ -22,14 +22,14 @@ import (
 	"fmt"
 	"net/url"
 
-	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/gogo/protobuf/proto"
 
 	log "github.com/sirupsen/logrus"
+
+	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
 
 var (
@@ -50,22 +50,22 @@ type LookupService interface {
 	// Lookup perform a lookup for the given topic, confirm the location of the broker
 	// where the topic is located, and return the LookupResult.
 	Lookup(topic string) (*LookupResult, error)
-
-	NetModelLookup(topic string, netModel string) (*LookupResult, error)
 }
 
 type lookupService struct {
-	rpcClient  RPCClient
-	serviceURL *url.URL
-	tlsEnabled bool
+	rpcClient    RPCClient
+	serviceURL   *url.URL
+	tlsEnabled   bool
+	listenerName string
 }
 
 // NewLookupService init a lookup service struct and return an object of LookupService.
-func NewLookupService(rpcClient RPCClient, serviceURL *url.URL, tlsEnabled bool) LookupService {
+func NewLookupService(rpcClient RPCClient, serviceURL *url.URL, tlsEnabled bool, listenerName string) LookupService {
 	return &lookupService{
-		rpcClient:  rpcClient,
-		serviceURL: serviceURL,
-		tlsEnabled: tlsEnabled,
+		rpcClient:    rpcClient,
+		serviceURL:   serviceURL,
+		tlsEnabled:   tlsEnabled,
+		listenerName: listenerName,
 	}
 }
 
@@ -98,9 +98,10 @@ func (ls *lookupService) Lookup(topic string) (*LookupResult, error) {
 	lookupRequestsCount.Inc()
 	id := ls.rpcClient.NewRequestID()
 	res, err := ls.rpcClient.RequestToAnyBroker(id, pb.BaseCommand_LOOKUP, &pb.CommandLookupTopic{
-		RequestId:     &id,
-		Topic:         &topic,
-		Authoritative: proto.Bool(false),
+		RequestId:              &id,
+		Topic:                  &topic,
+		Authoritative:          proto.Bool(false),
+		AdvertisedListenerName: proto.String(ls.listenerName),
 	})
 	if err != nil {
 		return nil, err
@@ -122,76 +123,10 @@ func (ls *lookupService) Lookup(topic string) (*LookupResult, error) {
 
 			id := ls.rpcClient.NewRequestID()
 			res, err = ls.rpcClient.Request(logicalAddress, physicalAddr, id, pb.BaseCommand_LOOKUP, &pb.CommandLookupTopic{
-				RequestId:     &id,
-				Topic:         &topic,
-				Authoritative: lr.Authoritative,
-			})
-			if err != nil {
-				return nil, err
-			}
-
-			// Process the response at the top of the loop
-			continue
-
-		case pb.CommandLookupTopicResponse_Connect:
-			log.Debugf("Successfully looked up topic{%s} on broker. %s / %s - Use proxy: %t",
-				topic, lr.GetBrokerServiceUrl(), lr.GetBrokerServiceUrlTls(), lr.GetProxyThroughServiceUrl())
-
-			logicalAddress, physicalAddress, err := ls.getBrokerAddress(lr)
-			if err != nil {
-				return nil, err
-			}
-
-			return &LookupResult{
-				LogicalAddr:  logicalAddress,
-				PhysicalAddr: physicalAddress,
-			}, nil
-
-		case pb.CommandLookupTopicResponse_Failed:
-			errorMsg := ""
-			if lr.Error != nil {
-				errorMsg = lr.Error.String()
-			}
-			log.Warnf("Failed to lookup topic: %s, error msg: %s", topic, errorMsg)
-			return nil, fmt.Errorf("failed to lookup topic: %s", errorMsg)
-		}
-	}
-
-	return nil, errors.New("exceeded max number of redirection during topic lookup")
-}
-
-func (ls *lookupService) NetModelLookup(topic string, netModel string) (*LookupResult, error) {
-	id := ls.rpcClient.NewRequestID()
-	res, err := ls.rpcClient.RequestToAnyBroker(id, pb.BaseCommand_LOOKUP, &pb.CommandLookupTopic{
-		RequestId:     &id,
-		Topic:         &topic,
-		Authoritative: proto.Bool(false),
-		NetModel:      &netModel,
-	})
-	if err != nil {
-		return nil, err
-	}
-	log.Debugf("Got topic{%s} lookup response: %+v", topic, res)
-
-	for i := 0; i < lookupResultMaxRedirect; i++ {
-		lr := res.Response.LookupTopicResponse
-		switch *lr.Response {
-
-		case pb.CommandLookupTopicResponse_Redirect:
-			logicalAddress, physicalAddr, err := ls.getBrokerAddress(lr)
-			if err != nil {
-				return nil, err
-			}
-
-			log.Debugf("Follow topic{%s} redirect to broker. %v / %v - Use proxy: %v",
-				topic, lr.BrokerServiceUrl, lr.BrokerServiceUrlTls, lr.ProxyThroughServiceUrl)
-
-			id := ls.rpcClient.NewRequestID()
-			res, err = ls.rpcClient.Request(logicalAddress, physicalAddr, id, pb.BaseCommand_LOOKUP, &pb.CommandLookupTopic{
-				RequestId:     &id,
-				Topic:         &topic,
-				Authoritative: lr.Authoritative,
-				NetModel:      &netModel,
+				RequestId:              &id,
+				Topic:                  &topic,
+				Authoritative:          lr.Authoritative,
+				AdvertisedListenerName: proto.String(ls.listenerName),
 			})
 			if err != nil {
 				return nil, err

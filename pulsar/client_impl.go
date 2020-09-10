@@ -38,20 +38,6 @@ const (
 	defaultOperationTimeout  = 30 * time.Second
 )
 
-const (
-	NetmodelIntranetPulsar = "INTRANET_PULSAR"
-
-	NetmodelIntranetPulsarSsl = "INTRANET_PULSAR_SSL"
-
-	NetmodelExtranetPulsar = "EXTRANET_PULSAR"
-
-	NetmodelExtenetPulsarSsl = "EXTRANET_PULSAR_SSL"
-
-	NetmodelVpcPulsar = "VPC_PULSAR"
-
-	NetmodelVpcPulsarSsl = "VPC_PULSAR_SSL"
-)
-
 type client struct {
 	// For Tencent TDMQ
 	options *ClientOptions
@@ -113,11 +99,6 @@ func newClient(options ClientOptions) (Client, error) {
 		operationTimeout = defaultOperationTimeout
 	}
 
-
-	if options.NetModel == "" {
-		options.NetModel = NetmodelVpcPulsar
-	}
-
 	maxConnectionsPerHost := options.MaxConnectionsPerBroker
 	if maxConnectionsPerHost <= 0 {
 		maxConnectionsPerHost = 1
@@ -128,7 +109,7 @@ func newClient(options ClientOptions) (Client, error) {
 		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout,maxConnectionsPerHost),
 	}
 	c.rpcClient = internal.NewRPCClient(url, c.cnxPool, operationTimeout)
-	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil)
+	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil,options.ListenerName)
 	c.handlers = internal.NewClientHandlers()
 	return c, nil
 }
@@ -170,7 +151,6 @@ func (c *client) TopicPartitions(topic string) ([]string, error) {
 		&pb.CommandPartitionedTopicMetadata{
 			RequestId: &id,
 			Topic:     &topicName.Name,
-			NetModel:  &c.options.NetModel,
 		})
 	if err != nil {
 		return nil, err
@@ -205,7 +185,6 @@ func (c *client) namespaceTopics(namespace string) ([]string, error) {
 		RequestId: proto.Uint64(id),
 		Namespace: proto.String(namespace),
 		Mode:      pb.CommandGetTopicsOfNamespace_PERSISTENT.Enum(),
-		NetModel:  proto.String(c.options.NetModel),
 	}
 	res, err := c.rpcClient.RequestToAnyBroker(id, pb.BaseCommand_GET_TOPICS_OF_NAMESPACE, req)
 	if err != nil {

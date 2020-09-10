@@ -80,6 +80,8 @@ var (
 		Help:    "Time it takes for application to process messages",
 		Buckets: []float64{.0005, .001, .005, .01, .025, .05, .1, .25, .5, 1, 2.5, 5, 10},
 	})
+
+	lastestMessageID = LatestMessageID()
 )
 
 type consumerState int
@@ -100,6 +102,10 @@ const (
 
 	// Lightweight subscription mode that doesn't have a durable cursor associated
 	nonDurable
+)
+
+const (
+	noMessageEntry = -1
 )
 
 type partitionConsumerOpts struct {
@@ -124,8 +130,6 @@ type partitionConsumerOpts struct {
 	// For Tencent TDMQ tag
 	tagMapTopicNames        map[string]string
 	tagPatternMapTopicNames map[string]string
-
-	netModel string
 
 	interceptors ConsumerInterceptors
 }
@@ -170,8 +174,6 @@ type partitionConsumer struct {
 
 	log *log.Entry
 
-	netModel string
-
 	compressionProviders map[pb.CompressionType]compression.Provider
 }
 
@@ -197,7 +199,6 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 		compressionProviders: make(map[pb.CompressionType]compression.Provider),
 		dlq:                  dlq,
 		log:                  log.WithField("topic", options.topic),
-		netModel:             options.netModel,
 		metadata:             make(map[string]string),
 	}
 	pc.log = pc.log.WithField("name", pc.name).
@@ -226,6 +227,21 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 	}
 	pc.log.Info("Created consumer")
 	pc.state = consumerReady
+
+	if pc.options.startMessageIDInclusive && pc.startMessageID == lastestMessageID {
+		msgID, err := pc.requestGetLastMessageID()
+		if err != nil {
+			return nil, err
+		}
+		if msgID.entryID != noMessageEntry {
+			pc.startMessageID = msgID
+
+			err = pc.requestSeek(msgID.messageID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	go pc.dispatcher()
 
@@ -286,7 +302,10 @@ func (pc *partitionConsumer) getLastMessageID() (trackingMessageID, error) {
 
 func (pc *partitionConsumer) internalGetLastMessageID(req *getLastMsgIDRequest) {
 	defer close(req.doneCh)
+	req.msgID, req.err = pc.requestGetLastMessageID()
+}
 
+func (pc *partitionConsumer) requestGetLastMessageID() (trackingMessageID, error) {
 	requestID := pc.client.rpcClient.NewRequestID()
 	cmdGetLastMessageID := &pb.CommandGetLastMessageId{
 		RequestId:  proto.Uint64(requestID),
@@ -296,11 +315,10 @@ func (pc *partitionConsumer) internalGetLastMessageID(req *getLastMsgIDRequest) 
 		pb.BaseCommand_GET_LAST_MESSAGE_ID, cmdGetLastMessageID)
 	if err != nil {
 		pc.log.WithError(err).Error("Failed to get last message id")
-		req.err = err
-	} else {
-		id := res.Response.GetLastMessageIdResponse.GetLastMessageId()
-		req.msgID = convertToMessageID(id)
+		return trackingMessageID{}, err
 	}
+	id := res.Response.GetLastMessageIdResponse.GetLastMessageId()
+	return convertToMessageID(id), nil
 }
 
 func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptions ReconsumeOptions) (Producer, *ProducerMessage, string, error) {
@@ -474,17 +492,20 @@ func (pc *partitionConsumer) Seek(msgID trackingMessageID) error {
 
 func (pc *partitionConsumer) internalSeek(seek *seekRequest) {
 	defer close(seek.doneCh)
+	seek.err = pc.requestSeek(seek.msgID.messageID)
+}
 
+func (pc *partitionConsumer) requestSeek(msgID messageID) error {
 	if pc.state == consumerClosing || pc.state == consumerClosed {
 		pc.log.Error("Consumer was already closed")
-		return
+		return nil
 	}
 
 	id := &pb.MessageIdData{}
-	err := proto.Unmarshal(seek.msgID.Serialize(), id)
+	err := proto.Unmarshal(msgID.Serialize(), id)
 	if err != nil {
 		pc.log.WithError(err).Errorf("deserialize message id error: %s", err.Error())
-		seek.err = err
+		return err
 	}
 
 	requestID := pc.client.rpcClient.NewRequestID()
@@ -497,10 +518,11 @@ func (pc *partitionConsumer) internalSeek(seek *seekRequest) {
 	_, err = pc.client.rpcClient.RequestOnCnx(pc.conn, requestID, pb.BaseCommand_SEEK, cmdSeek)
 	if err != nil {
 		pc.log.WithError(err).Error("Failed to reset to message id")
-		seek.err = err
+		return err
 	} else {
 		pc.clearMessageCh()
 	}
+	return nil
 }
 
 func (pc *partitionConsumer) SeekByTime(time time.Time) error {
@@ -541,7 +563,7 @@ func (pc *partitionConsumer) internalSeekByTime(seek *seekByTimeRequest) {
 
 func (pc *partitionConsumer) clearMessageCh() {
 Label:
-	for {
+	for ; ; {
 		select {
 		case <-pc.messageCh:
 		default:
@@ -942,7 +964,7 @@ func (pc *partitionConsumer) reconnectToBroker() {
 }
 
 func (pc *partitionConsumer) grabConn() error {
-	lr, err := pc.client.lookupService.NetModelLookup(pc.topic, pc.client.options.NetModel)
+	lr, err := pc.client.lookupService.Lookup(pc.topic)
 	if err != nil {
 		pc.log.WithError(err).Warn("Failed to lookup topic")
 		return err

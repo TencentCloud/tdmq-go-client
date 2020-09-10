@@ -154,9 +154,6 @@ type ConsumerOptions struct {
 	// For Tencent TDMQ tag support tag pattern
 	TagPatternMapTopicNames map[string]string
 
-	// For Tencent TDMQ VPC NetModel
-	NetModel string
-
 	// A chain of interceptors, These interceptors will be called at some points defined in ConsumerInterceptor interface.
 	Interceptors ConsumerInterceptors
 }

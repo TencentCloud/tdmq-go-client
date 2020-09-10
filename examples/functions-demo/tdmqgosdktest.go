@@ -1780,7 +1780,7 @@ func vpcNetModel(secretId, secretKey, uin, region, brokerUrl, topic, subname, ne
 	client, err := pulsar.NewClient(pulsar.ClientOptions{
 		URL:       brokerUrl,
 		AuthCloud: pulsar.NewAuthenticationCloudCam(authParams),
-		NetModel:  netModel,
+		ListenerName:  netModel,
 	})
 	if err != nil {
 		log.Fatal(err)
