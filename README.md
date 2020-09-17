@@ -131,16 +131,11 @@ for reader.HasNext() {
 ```
 Auth Cloud Config:
 ```go
-authParams := make(map[string]string)
-authParams["secretId"] = "AKxxxxxxxxxxCx"
-authParams["secretKey"] = "SDxxxxxxxxxxCb"
-authParams["region"] = "ap-guangzhou"
-authParams["ownerUin"] = "xxxxxxxxxx"
-authParams["uin"] = "xxxxxxxxxx"
-client, err := pulsar.NewClient(pulsar.ClientOptions{
-	URL:       "pulsar://9.xx.xx.8:6650",
-	AuthCloud: pulsar.NewAuthenticationCloudCam(authParams), //在这里配置CAM认证
-})
+client, err := NewClient(ClientOptions{
+	URL:            "pulsar://*.*.*.*:6000",
+	ListenerName:		"custom:1300*****0/vpc-******/subnet-********",
+	Authentication: NewAuthenticationToken("eyJh****"),
+    })
 if err != nil {
 	log.Fatal(err)
 }
