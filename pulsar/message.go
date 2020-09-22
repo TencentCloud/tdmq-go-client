@@ -111,6 +111,9 @@ type Message interface {
 type MessageID interface {
 	// Serialize the message id into a sequence of bytes that can be stored somewhere else
 	Serialize() []byte
+
+	// String returns string representation of MessageID
+	String() string
 }
 
 // DeserializeMessageID reconstruct a MessageID object from its serialized representation
