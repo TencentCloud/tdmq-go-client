@@ -348,6 +348,8 @@ func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptio
 			} else {
 				delayLevels += 1
 			}
+		}else{
+			delayLevels = 1
 		}
 		delayTime = pc.options.delayLevelUtil.GetDelayTime(delayLevels)
 	}
