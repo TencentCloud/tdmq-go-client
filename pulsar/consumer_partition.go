@@ -411,9 +411,15 @@ func (pc *partitionConsumer) internalReconsumeAsync(prod Producer, originalMsg M
 	prod.SendAsync(context.Background(),
 		producerMsg,
 		func(msgId MessageID, producerMsg *ProducerMessage, e error) {
-			pc.log.WithField("msgID", originalMsg.(*message).ID()).Debug("Sent message to " + desType + " Topic")
-			pc.AckID(originalMsg.(*message).ID().(trackingMessageID))
-			pc.nackTracker.Del(originalMsg.(*message).ID().(trackingMessageID))
+			if e == nil {
+				pc.log.WithField("msgID", originalMsg.(*message).ID()).Debug("Sent message to " + desType + " Topic")
+				pc.AckID(originalMsg.(*message).ID().(trackingMessageID))
+				pc.nackTracker.Del(originalMsg.(*message).ID().(trackingMessageID))
+			} else {
+				msgIds := make([]messageID, 1)
+				msgIds[0] = originalMsg.ID().(trackingMessageID).messageID
+				pc.eventsCh <- &redeliveryRequest{msgIds}
+			}
 			if callback != nil {
 				callback(msgId, producerMsg, e)
 			}

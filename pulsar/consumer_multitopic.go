@@ -137,9 +137,10 @@ func (c *multiTopicConsumer) ReconsumeLaterAsync(message Message, reconsumeOptio
 		c.log.Warn("[ReconsumeLaterAsync]Message Parse TopicName Failed with Error :", err)
 		return
 	}
+	topicNameWithoutPartition := internal.TopicNameWithoutPartitionPart(topicName)
 	for topic, consumer := range c.consumers {
 		consumerTopicName, _ := internal.ParseTopicName(topic)
-		if consumerTopicName.Name == topicName.Name {
+		if consumerTopicName.Name == topicNameWithoutPartition {
 			consumer.ReconsumeLaterAsync(message, reconsumeOptions, callback)
 			return
 		}
