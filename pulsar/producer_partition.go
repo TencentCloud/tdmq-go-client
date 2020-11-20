@@ -32,7 +32,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
@@ -91,7 +91,7 @@ type partitionProducer struct {
 	state  int32
 	client *client
 	topic  string
-	log    *log.Entry
+	log    log.Logger
 	cnx    internal.Connection
 
 	options             *ProducerOptions
@@ -102,13 +102,14 @@ type partitionProducer struct {
 	batchFlushTicker    *time.Ticker
 
 	// Channel where app is posting messages to be published
-	eventsChan chan interface{}
+	eventsChan      chan interface{}
+	connectClosedCh chan connectionClosed
 
 	publishSemaphore internal.Semaphore
 	pendingQueue     internal.BlockingQueue
 	lastSequenceID   int64
-
-	partitionIdx int32
+	schemaInfo       *SchemaInfo
+	partitionIdx     int32
 }
 
 func newPartitionProducer(client *client, topic string, options *ProducerOptions, partitionIdx int) (
@@ -127,19 +128,28 @@ func newPartitionProducer(client *client, topic string, options *ProducerOptions
 		maxPendingMessages = options.MaxPendingMessages
 	}
 
+	logger := client.log.SubLogger(log.Fields{"topic": topic})
+
 	p := &partitionProducer{
 		state:            producerInit,
-		log:              log.WithField("topic", topic),
 		client:           client,
 		topic:            topic,
+		log:              logger,
 		options:          options,
 		producerID:       client.rpcClient.NewProducerID(),
 		eventsChan:       make(chan interface{}, maxPendingMessages),
+		connectClosedCh:  make(chan connectionClosed, 10),
 		batchFlushTicker: time.NewTicker(batchingMaxPublishDelay),
 		publishSemaphore: internal.NewSemaphore(int32(maxPendingMessages)),
 		pendingQueue:     internal.NewBlockingQueue(maxPendingMessages),
 		lastSequenceID:   -1,
 		partitionIdx:     int32(partitionIdx),
+	}
+
+	if options.Schema != nil && options.Schema.GetSchemaInfo() != nil {
+		p.schemaInfo = options.Schema.GetSchemaInfo()
+	} else {
+		p.schemaInfo = nil
 	}
 
 	if options.Name != "" {
@@ -148,12 +158,15 @@ func newPartitionProducer(client *client, topic string, options *ProducerOptions
 
 	err := p.grabCnx()
 	if err != nil {
-		log.WithError(err).Errorf("Failed to create producer")
+		logger.WithError(err).Error("Failed to create producer")
 		return nil, err
 	}
 
-	p.log = p.log.WithField("producer_name", p.producerName).
-		WithField("producerID", p.producerID)
+	p.log = p.log.SubLogger(log.Fields{
+		"producer_name": p.producerName,
+		"producerID":    p.producerID,
+	})
+
 	p.log.WithField("cnx", p.cnx.ID()).Info("Created producer")
 	atomic.StoreInt32(&p.state, producerReady)
 
@@ -171,12 +184,30 @@ func (p *partitionProducer) grabCnx() error {
 
 	p.log.Debug("Lookup result: ", lr)
 	id := p.client.rpcClient.NewRequestID()
+
+	// set schema info for producer
+
+	pbSchema := new(pb.Schema)
+	if p.schemaInfo != nil {
+		tmpSchemaType := pb.Schema_Type(int32(p.schemaInfo.Type))
+		pbSchema = &pb.Schema{
+			Name:       proto.String(p.schemaInfo.Name),
+			Type:       &tmpSchemaType,
+			SchemaData: []byte(p.schemaInfo.Schema),
+			Properties: internal.ConvertFromStringMap(p.schemaInfo.Properties),
+		}
+		p.log.Debugf("The partition consumer schema name is: %s", pbSchema.Name)
+	} else {
+		pbSchema = nil
+		p.log.Debug("The partition consumer schema is nil")
+	}
+
 	cmdProducer := &pb.CommandProducer{
 		RequestId:  proto.Uint64(id),
 		Topic:      proto.String(p.topic),
 		Encrypted:  nil,
 		ProducerId: proto.Uint64(p.producerID),
-		Schema:     nil,
+		Schema:     pbSchema,
 	}
 
 	if p.producerName != "" {
@@ -215,7 +246,8 @@ func (p *partitionProducer) grabCnx() error {
 		p.batchBuilder, err = internal.NewBatchBuilder(p.options.BatchingMaxMessages, p.options.BatchingMaxSize,
 			p.producerName, p.producerID, pb.CompressionType(p.options.CompressionType),
 			compression.Level(p.options.CompressionLevel),
-			p)
+			p,
+			p.log)
 		if err != nil {
 			return err
 		}
@@ -252,12 +284,22 @@ func (p *partitionProducer) GetBuffer() internal.Buffer {
 func (p *partitionProducer) ConnectionClosed() {
 	// Trigger reconnection in the produce goroutine
 	p.log.WithField("cnx", p.cnx.ID()).Warn("Connection was closed")
-	p.eventsChan <- &connectionClosed{}
+	p.connectClosedCh <- connectionClosed{}
 }
 
 func (p *partitionProducer) reconnectToBroker() {
-	backoff := internal.Backoff{}
-	for {
+	var (
+		maxRetry int
+		backoff  = internal.Backoff{}
+	)
+
+	if p.options.MaxReconnectToBroker == nil {
+		maxRetry = -1
+	} else {
+		maxRetry = int(*p.options.MaxReconnectToBroker)
+	}
+
+	for maxRetry != 0 {
 		if atomic.LoadInt32(&p.state) != producerReady {
 			// Producer is already closing
 			return
@@ -273,6 +315,10 @@ func (p *partitionProducer) reconnectToBroker() {
 			p.log.WithField("cnx", p.cnx.ID()).Info("Reconnected producer to broker")
 			return
 		}
+
+		if maxRetry > 0 {
+			maxRetry--
+		}
 	}
 }
 
@@ -283,15 +329,14 @@ func (p *partitionProducer) runEventsLoop() {
 			switch v := i.(type) {
 			case *sendRequest:
 				p.internalSend(v)
-			case *connectionClosed:
-				p.reconnectToBroker()
 			case *flushRequest:
 				p.internalFlush(v)
 			case *closeProducer:
 				p.internalClose(v)
 				return
 			}
-
+		case <-p.connectClosedCh:
+			p.reconnectToBroker()
 		case <-p.batchFlushTicker.C:
 			p.internalFlushCurrentBatch()
 		}
@@ -311,13 +356,28 @@ func (p *partitionProducer) internalSend(request *sendRequest) {
 
 	msg := request.msg
 
+	payload := msg.Payload
+	var schemaPayload []byte
+	var err error
+	if p.options.Schema != nil {
+		schemaPayload, err = p.options.Schema.Encode(msg.Value)
+		if err != nil {
+			return
+		}
+	}
+
+	if payload == nil {
+		payload = schemaPayload
+	}
+
 	// if msg is too large
-	if len(msg.Payload) > int(p.cnx.GetMaxMessageSize()) {
+	if len(payload) > int(p.cnx.GetMaxMessageSize()) {
 		p.publishSemaphore.Release()
 		request.callback(nil, request.msg, errMessageTooLarge)
-		p.log.WithField("size", len(msg.Payload)).
+		p.log.WithError(errMessageTooLarge).
+			WithField("size", len(payload)).
 			WithField("properties", msg.Properties).
-			WithError(errMessageTooLarge).Error()
+			Error()
 		publishErrors.Inc()
 		return
 	}
@@ -332,7 +392,7 @@ func (p *partitionProducer) internalSend(request *sendRequest) {
 		deliverAt.UnixNano() < 0
 
 	smm := &pb.SingleMessageMetadata{
-		PayloadSize: proto.Int(len(msg.Payload)),
+		PayloadSize: proto.Int(len(payload)),
 	}
 
 	if msg.EventTime.UnixNano() != 0 {
@@ -380,18 +440,21 @@ func (p *partitionProducer) internalSend(request *sendRequest) {
 		sequenceID = internal.GetAndAdd(p.sequenceIDGenerator, 1)
 	}
 
-	added := p.batchBuilder.Add(smm, sequenceID, msg.Payload, request,
+	if !sendAsBatch {
+		p.internalFlushCurrentBatch()
+	}
+	added := p.batchBuilder.Add(smm, sequenceID, payload, request,
 		msg.ReplicationClusters, deliverAt)
 	if !added {
 		// The current batch is full.. flush it and retry
 		p.internalFlushCurrentBatch()
 
 		// after flushing try again to add the current payload
-		if ok := p.batchBuilder.Add(smm, sequenceID, msg.Payload, request,
+		if ok := p.batchBuilder.Add(smm, sequenceID, payload, request,
 			msg.ReplicationClusters, deliverAt); !ok {
 			p.publishSemaphore.Release()
 			request.callback(nil, request.msg, errFailAddBatch)
-			p.log.WithField("size", len(msg.Payload)).
+			p.log.WithField("size", len(payload)).
 				WithField("sequenceID", sequenceID).
 				WithField("properties", msg.Properties).
 				Error("unable to add message to batch")
@@ -483,7 +546,6 @@ func (p *partitionProducer) SendAsync(ctx context.Context, msg *ProducerMessage,
 
 func (p *partitionProducer) internalSendAsync(ctx context.Context, msg *ProducerMessage,
 	callback func(MessageID, *ProducerMessage, error), flushImmediately bool) {
-
 	sr := &sendRequest{
 		ctx:              ctx,
 		msg:              msg,

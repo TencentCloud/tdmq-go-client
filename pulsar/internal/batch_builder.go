@@ -25,15 +25,7 @@ import (
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 	"github.com/gogo/protobuf/proto"
 
-	log "github.com/sirupsen/logrus"
-)
-
-const (
-	// DefaultMaxBatchSize init default for maximum number of bytes per batch
-	DefaultMaxBatchSize = 128 * 1024
-
-	// DefaultMaxMessagesPerBatch init default num of entries in per batch.
-	DefaultMaxMessagesPerBatch = 1000
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 type BuffersPool interface {
@@ -64,18 +56,15 @@ type BatchBuilder struct {
 
 	compressionProvider compression.Provider
 	buffersPool         BuffersPool
+
+	log log.Logger
 }
 
 // NewBatchBuilder init batch builder and return BatchBuilder pointer. Build a new batch message container.
 func NewBatchBuilder(maxMessages uint, maxBatchSize uint, producerName string, producerID uint64,
 	compressionType pb.CompressionType, level compression.Level,
-	bufferPool BuffersPool) (*BatchBuilder, error) {
-	if maxMessages == 0 {
-		maxMessages = DefaultMaxMessagesPerBatch
-	}
-	if maxBatchSize == 0 {
-		maxBatchSize = DefaultMaxBatchSize
-	}
+	bufferPool BuffersPool, logger log.Logger) (*BatchBuilder, error) {
+
 	bb := &BatchBuilder{
 		buffer:       NewBuffer(4096),
 		numMessages:  0,
@@ -93,6 +82,7 @@ func NewBatchBuilder(maxMessages uint, maxBatchSize uint, producerName string, p
 		callbacks:           []interface{}{},
 		compressionProvider: getCompressionProvider(compressionType, level),
 		buffersPool:         bufferPool,
+		log:                 logger,
 	}
 
 	if compressionType != pb.CompressionType_NONE {
@@ -157,6 +147,7 @@ func (bb *BatchBuilder) reset() {
 	bb.buffer.Clear()
 	bb.callbacks = []interface{}{}
 	bb.msgMetadata.ReplicateTo = nil
+	bb.msgMetadata.DeliverAtTime = nil
 }
 
 // Flush all the messages buffered in the client and wait until all messages have been successfully persisted.
@@ -165,7 +156,7 @@ func (bb *BatchBuilder) Flush() (batchData Buffer, sequenceID uint64, callbacks 
 		// No-Op for empty batch
 		return nil, 0, nil
 	}
-	log.Debug("BatchBuilder flush: messages: ", bb.numMessages)
+	bb.log.Debug("BatchBuilder flush: messages: ", bb.numMessages)
 
 	bb.msgMetadata.NumMessagesInBatch = proto.Int32(int32(bb.numMessages))
 	bb.cmdSend.Send.NumMessages = proto.Int32(int32(bb.numMessages))
@@ -201,7 +192,6 @@ func getCompressionProvider(compressionType pb.CompressionType,
 	case pb.CompressionType_ZSTD:
 		return compression.NewZStdProvider(level)
 	default:
-		log.Panic("unsupported compression type")
-		return nil
+		panic("unsupported compression type")
 	}
 }

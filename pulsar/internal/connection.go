@@ -37,11 +37,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
 	"github.com/gogo/protobuf/proto"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/auth"
 
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 const (
@@ -94,7 +94,7 @@ type ConnectionListener interface {
 // Connection is a interface of client cnx.
 type Connection interface {
 	SendRequest(requestID uint64, req *pb.BaseCommand, callback func(*pb.BaseCommand, error))
-	SendRequestNoWait(req *pb.BaseCommand)
+	SendRequestNoWait(req *pb.BaseCommand) error
 	WriteData(data Buffer)
 	RegisterListener(id uint64, listener ConnectionListener)
 	UnregisterListener(id uint64)
@@ -115,21 +115,15 @@ type ConsumerHandler interface {
 type connectionState int32
 
 const (
-	connectionInit         = 0
-	connectionConnecting   = 1
-	connectionTCPConnected = 2
-	connectionReady        = 3
-	connectionClosed       = 4
+	connectionInit   = 0
+	connectionReady  = 1
+	connectionClosed = 2
 )
 
 func (s connectionState) String() string {
 	switch s {
 	case connectionInit:
 		return "Initializing"
-	case connectionConnecting:
-		return "Connecting"
-	case connectionTCPConnected:
-		return "TCPConnected"
 	case connectionReady:
 		return "Ready"
 	case connectionClosed:
@@ -172,7 +166,7 @@ type connection struct {
 	pingTicker           *time.Ticker
 	pingCheckTicker      *time.Ticker
 
-	log *log.Entry
+	log log.Logger
 
 	requestIDGenerator uint64
 
@@ -197,21 +191,30 @@ type connection struct {
 	authCloud authcloud.AuthenticationCloud
 }
 
-func newConnection(logicalAddr *url.URL, physicalAddr *url.URL, tlsOptions *TLSOptions,
-	connectionTimeout time.Duration, auth auth.Provider) *connection {
+// connectionOptions defines configurations for creating connection.
+type connectionOptions struct {
+	logicalAddr       *url.URL
+	physicalAddr      *url.URL
+	tls               *TLSOptions
+	connectionTimeout time.Duration
+	auth              auth.Provider
+	logger            log.Logger
+}
+
+func newConnection(opts connectionOptions) *connection {
 	cnx := &connection{
 		state:                int32(connectionInit),
-		connectionTimeout:    connectionTimeout,
-		logicalAddr:          logicalAddr,
-		physicalAddr:         physicalAddr,
+		connectionTimeout:    opts.connectionTimeout,
+		logicalAddr:          opts.logicalAddr,
+		physicalAddr:         opts.physicalAddr,
 		writeBuffer:          NewBuffer(4096),
-		log:                  log.WithField("remote_addr", physicalAddr),
+		log:                  opts.logger.SubLogger(log.Fields{"remote_addr": opts.physicalAddr}),
 		pendingReqs:          make(map[uint64]*request),
 		lastDataReceivedTime: time.Now(),
 		pingTicker:           time.NewTicker(keepAliveInterval),
 		pingCheckTicker:      time.NewTicker(keepAliveInterval),
-		tlsOptions:           tlsOptions,
-		auth:                 auth,
+		tlsOptions:           opts.tls,
+		auth:                 opts.auth,
 
 		closeCh:            make(chan interface{}),
 		incomingRequestsCh: make(chan *request, 10),
@@ -234,8 +237,15 @@ func newConnection(logicalAddr *url.URL, physicalAddr *url.URL, tlsOptions *TLSO
 //For Tencent cloud auth cam
 func newConnectionAuthCloud(logicalAddr *url.URL, physicalAddr *url.URL, tlsOptions *TLSOptions,
 	connectionTimeout time.Duration, auth auth.Provider,
-	authCloud authcloud.AuthenticationCloud) *connection {
-	cnx := newConnection(logicalAddr,physicalAddr,tlsOptions,connectionTimeout,auth)
+	authCloud authcloud.AuthenticationCloud, log log.Logger) *connection {
+	cnx := newConnection(connectionOptions{
+		logicalAddr:       logicalAddr,
+		physicalAddr:      physicalAddr,
+		tls:               tlsOptions,
+		connectionTimeout: connectionTimeout,
+		auth:              auth,
+		logger:            log,
+	})
 	cnx.authCloud = authCloud
 	return cnx
 }
@@ -290,11 +300,9 @@ func (c *connection) connect() bool {
 
 	c.Lock()
 	c.cnx = cnx
-	c.log = c.log.WithField("local_addr", c.cnx.LocalAddr())
+	c.log = c.log.SubLogger(log.Fields{"local_addr": c.cnx.LocalAddr()})
 	c.log.Info("TCP connection established")
 	c.Unlock()
-
-	c.changeState(connectionTCPConnected)
 
 	return true
 }
@@ -383,10 +391,19 @@ func (c *connection) waitUntilReady() error {
 	return nil
 }
 
+func (c *connection) failLeftRequestsWhenClose() {
+	for req := range c.incomingRequestsCh {
+		c.internalSendRequest(req)
+	}
+	close(c.incomingRequestsCh)
+}
+
 func (c *connection) run() {
 	// All reads come from the reader goroutine
 	go c.reader.readFromConnection()
 	go c.runPingCheck()
+
+	c.log.Debugf("Connection run start channel %+v, requestLength %d", c, len(c.incomingRequestsCh))
 
 	defer func() {
 		// all the accesses to the pendingReqs should be happened in this run loop thread,
@@ -399,11 +416,12 @@ func (c *connection) run() {
 		c.pendingLock.Unlock()
 		c.Close()
 	}()
-	
+
 	go func() {
 		for {
 			select {
 			case <-c.closeCh:
+				c.failLeftRequestsWhenClose()
 				return
 
 			case req := <-c.incomingRequestsCh:
@@ -420,11 +438,11 @@ func (c *connection) run() {
 		case <-c.closeCh:
 			return
 		/*
-		case req := <-c.incomingRequestsCh:
-			if req == nil {
-				return
-			}
-			c.internalSendRequest(req)
+			case req := <-c.incomingRequestsCh:
+				if req == nil {
+					return
+				}
+				c.internalSendRequest(req)
 		*/
 		case cmd := <-c.incomingCmdCh:
 			c.internalReceivedCommand(cmd.cmd, cmd.headersAndPayload)
@@ -510,9 +528,11 @@ func (c *connection) writeCommand(cmd *pb.BaseCommand) {
 	c.writeBuffer.WriteUint32(frameSize)
 
 	c.writeBuffer.WriteUint32(cmdSize)
+	c.writeBuffer.ResizeIfNeeded(cmdSize)
 	_, err := cmd.MarshalToSizedBuffer(c.writeBuffer.WritableSlice()[:cmdSize])
 	if err != nil {
-		c.log.WithError(err).Fatal("Protobuf serialization error")
+		c.log.WithError(err).Error("Protobuf serialization error")
+		panic("Protobuf serialization error")
 	}
 
 	c.writeBuffer.WrittenBytes(cmdSize)
@@ -592,19 +612,28 @@ func (c *connection) Write(data Buffer) {
 
 func (c *connection) SendRequest(requestID uint64, req *pb.BaseCommand,
 	callback func(command *pb.BaseCommand, err error)) {
-	c.incomingRequestsCh <- &request{
-		id:       &requestID,
-		cmd:      req,
-		callback: callback,
+	if c.state == connectionClosed {
+		callback(req, ErrConnectionClosed)
+	} else {
+		c.incomingRequestsCh <- &request{
+			id:       &requestID,
+			cmd:      req,
+			callback: callback,
+		}
 	}
 }
 
-func (c *connection) SendRequestNoWait(req *pb.BaseCommand) {
+func (c *connection) SendRequestNoWait(req *pb.BaseCommand) error {
+	if c.state == connectionClosed {
+		return ErrConnectionClosed
+	}
+
 	c.incomingRequestsCh <- &request{
 		id:       nil,
 		cmd:      req,
 		callback: nil,
 	}
+	return nil
 }
 
 func (c *connection) internalSendRequest(req *request) {
@@ -613,7 +642,14 @@ func (c *connection) internalSendRequest(req *request) {
 		c.pendingReqs[*req.id] = req
 	}
 	c.pendingLock.Unlock()
-	c.writeCommand(req.cmd)
+	if c.state == connectionClosed {
+		c.log.Warnf("internalSendRequest failed for connectionClosed")
+		if req.callback != nil {
+			req.callback(req.cmd, ErrConnectionClosed)
+		}
+	} else {
+		c.writeCommand(req.cmd)
+	}
 }
 
 func (c *connection) handleResponse(requestID uint64, response *pb.BaseCommand) {
@@ -652,9 +688,10 @@ func (c *connection) handleSendReceipt(response *pb.CommandSendReceipt) {
 	producerID := response.GetProducerId()
 
 	c.Lock()
-	defer c.Unlock()
+	producer, ok := c.listeners[producerID]
+	c.Unlock()
 
-	if producer, ok := c.listeners[producerID]; ok {
+	if ok {
 		producer.ReceivedSendReceipt(response)
 	} else {
 		c.log.WithField("producerID", producerID).Warn("Got unexpected send receipt for message: ", response.MessageId)
@@ -667,7 +704,10 @@ func (c *connection) handleMessage(response *pb.CommandMessage, payload Buffer) 
 	if consumer, ok := c.consumerHandler(consumerID); ok {
 		err := consumer.MessageReceived(response, payload)
 		if err != nil {
-			c.log.WithField("consumerID", consumerID).WithError(err).Error("handle message Id: ", response.MessageId)
+			c.log.
+				WithError(err).
+				WithField("consumerID", consumerID).
+				Error("handle message Id: ", response.MessageId)
 		}
 	} else {
 		c.log.WithField("consumerID", consumerID).Warn("Got unexpected message: ", response.MessageId)

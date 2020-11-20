@@ -28,11 +28,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 var (
@@ -79,7 +78,7 @@ type consumer struct {
 	errorCh   chan error
 	ticker    *time.Ticker
 
-	log *log.Entry
+	log log.Logger
 }
 
 func newConsumer(client *client, options ConsumerOptions) (Consumer, error) {
@@ -92,7 +91,7 @@ func newConsumer(client *client, options ConsumerOptions) (Consumer, error) {
 	}
 
 	if options.ReceiverQueueSize <= 0 {
-		options.ReceiverQueueSize = 1000
+		options.ReceiverQueueSize = defaultReceiverQueueSize
 	}
 
 	if options.Interceptors == nil {
@@ -101,6 +100,12 @@ func newConsumer(client *client, options ConsumerOptions) (Consumer, error) {
 
 	if options.Name == "" {
 		options.Name = generateRandomName()
+	}
+
+	if options.Schema != nil && options.Schema.GetSchemaInfo() != nil {
+		if options.Schema.GetSchemaInfo().Type == NONE {
+			options.Schema = NewBytesSchema(nil)
+		}
 	}
 
 	// did the user pass in a message channel?
@@ -145,11 +150,13 @@ func newConsumer(client *client, options ConsumerOptions) (Consumer, error) {
 		}
 	}
 
-	dlq, err := newDlqRouter(client, options.DLQ)
+	dlq, err := newDlqRouter(client, options.DLQ, client.log)
 	if err != nil {
 		return nil, err
 	}
 
+	// normalize as FQDN topics
+	var tns []*internal.TopicName
 	// single topic consumer
 	if options.Topic != "" || len(options.Topics) == 1 {
 		topic := options.Topic
@@ -157,16 +164,19 @@ func newConsumer(client *client, options ConsumerOptions) (Consumer, error) {
 			topic = options.Topics[0]
 		}
 
-		if err := validateTopicNames(topic); err != nil {
+		if tns, err = validateTopicNames(topic); err != nil {
 			return nil, err
 		}
-
+		topic = tns[0].Name
 		return topicSubscribe(client, options, topic, messageCh, dlq)
 	}
 
 	if len(options.Topics) > 1 {
-		if err := validateTopicNames(options.Topics...); err != nil {
+		if tns, err = validateTopicNames(options.Topics...); err != nil {
 			return nil, err
+		}
+		for i := range options.Topics {
+			options.Topics[i] = tns[i].Name
 		}
 
 		return newMultiTopicConsumer(client, options, options.Topics, messageCh, dlq)
@@ -201,7 +211,7 @@ func newInternalConsumer(client *client, options ConsumerOptions, topic string,
 		closeCh:                   make(chan struct{}),
 		errorCh:                   make(chan error),
 		dlq:                       dlq,
-		log:                       log.WithField("topic", topic),
+		log:                       client.log.SubLogger(log.Fields{"topic": topic}),
 		consumerName:              options.Name,
 	}
 
@@ -329,7 +339,10 @@ func (c *consumer) internalTopicSubscribeToPartitions() error {
 
 				delayLevelUtil: c.options.DelayLevelUtil,
 
-				interceptors:               c.options.Interceptors,
+				interceptors:         c.options.Interceptors,
+				maxReconnectToBroker: c.options.MaxReconnectToBroker,
+				keySharedPolicy:      c.options.KeySharedPolicy,
+				schema:               c.options.Schema,
 			}
 			cons, err := newPartitionConsumer(c, c.client, opts, c.messageCh, c.dlq)
 			ch <- ConsumerError{

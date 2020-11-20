@@ -18,12 +18,12 @@
 package pulsar
 
 import (
+	"fmt"
+	"github.com/gogo/protobuf/proto"
 	"math/big"
 	"strings"
 	"sync"
 	"time"
-	"fmt"
-	"github.com/gogo/protobuf/proto"
 
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
 )
@@ -104,7 +104,7 @@ func (id messageID) Serialize() []byte {
 }
 
 func (id messageID) String() string {
-        return fmt.Sprintf("%d:%d:%d", id.ledgerID, id.entryID, id.partitionIdx)
+	return fmt.Sprintf("%d:%d:%d", id.ledgerID, id.entryID, id.partitionIdx)
 }
 
 func deserializeMessageID(data []byte) (MessageID, error) {
@@ -177,6 +177,7 @@ type message struct {
 	replicationClusters []string
 	replicatedFrom      string
 	redeliveryCount     uint32
+	schema              Schema
 }
 
 func (msg *message) Topic() string {
@@ -217,6 +218,10 @@ func (msg *message) IsReplicated() bool {
 
 func (msg *message) GetReplicatedFrom() string {
 	return msg.replicatedFrom
+}
+
+func (msg *message) GetSchemaValue(v interface{}) error {
+	return msg.schema.Decode(msg.payLoad, v)
 }
 
 func (msg *message) ProducerName() string {

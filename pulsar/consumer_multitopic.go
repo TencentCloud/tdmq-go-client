@@ -27,7 +27,7 @@ import (
 
 	pkgerrors "github.com/pkg/errors"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 type multiTopicConsumer struct {
@@ -42,7 +42,7 @@ type multiTopicConsumer struct {
 	closeOnce sync.Once
 	closeCh   chan struct{}
 
-	log *log.Entry
+	log log.Logger
 }
 
 func newMultiTopicConsumer(client *client, options ConsumerOptions, topics []string,
@@ -53,7 +53,7 @@ func newMultiTopicConsumer(client *client, options ConsumerOptions, topics []str
 		consumers:    make(map[string]Consumer, len(topics)),
 		closeCh:      make(chan struct{}),
 		dlq:          dlq,
-		log:          &log.Entry{},
+		log:          client.log.SubLogger(log.Fields{"topic": topics}),
 		consumerName: options.Name,
 	}
 

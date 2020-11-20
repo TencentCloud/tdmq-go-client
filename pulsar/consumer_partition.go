@@ -32,11 +32,10 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/compression"
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 var (
@@ -131,7 +130,10 @@ type partitionConsumerOpts struct {
 	tagMapTopicNames        map[string]string
 	tagPatternMapTopicNames map[string]string
 
-	interceptors ConsumerInterceptors
+	interceptors         ConsumerInterceptors
+	maxReconnectToBroker *uint
+	keySharedPolicy      *KeySharedPolicy
+	schema               Schema
 }
 
 type partitionConsumer struct {
@@ -164,15 +166,16 @@ type partitionConsumer struct {
 	startMessageID  trackingMessageID
 	lastDequeuedMsg trackingMessageID
 
-	eventsCh     chan interface{}
-	connectedCh  chan struct{}
-	closeCh      chan struct{}
-	clearQueueCh chan func(id trackingMessageID)
+	eventsCh        chan interface{}
+	connectedCh     chan struct{}
+	connectClosedCh chan connectionClosed
+	closeCh         chan struct{}
+	clearQueueCh    chan func(id trackingMessageID)
 
 	nackTracker *negativeAcksTracker
 	dlq         *dlqRouter
 
-	log *log.Entry
+	log log.Logger
 
 	compressionProviders map[pb.CompressionType]compression.Provider
 }
@@ -188,23 +191,26 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 		name:                 options.consumerName,
 		consumerID:           client.rpcClient.NewConsumerID(),
 		partitionIdx:         int32(options.partitionIdx),
-		eventsCh:             make(chan interface{}, 3),
+		eventsCh:             make(chan interface{}, 10),
 		queueSize:            int32(options.receiverQueueSize),
 		queueCh:              make(chan []*message, options.receiverQueueSize),
 		startMessageID:       options.startMessageID,
 		connectedCh:          make(chan struct{}),
 		messageCh:            messageCh,
+		connectClosedCh:      make(chan connectionClosed, 10),
 		closeCh:              make(chan struct{}),
 		clearQueueCh:         make(chan func(id trackingMessageID)),
 		compressionProviders: make(map[pb.CompressionType]compression.Provider),
 		dlq:                  dlq,
-		log:                  log.WithField("topic", options.topic),
 		metadata:             make(map[string]string),
 	}
-	pc.log = pc.log.WithField("name", pc.name).
-		WithField("subscription", options.subscription).
-		WithField("consumerID", pc.consumerID)
-	pc.nackTracker = newNegativeAcksTracker(pc, options.nackRedeliveryDelay)
+	pc.log = client.log.SubLogger(log.Fields{
+		"name":         pc.name,
+		"topic":        options.topic,
+		"subscription": options.subscription,
+		"consumerID":   pc.consumerID,
+	})
+	pc.nackTracker = newNegativeAcksTracker(pc, options.nackRedeliveryDelay, pc.log)
 
 	// For Tencent TDMQ tag
 	partitionedTopicName := internal.GetPartitionedTopicName(options.topic, options.partitionIdx)
@@ -222,7 +228,7 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 
 	err := pc.grabConn()
 	if err != nil {
-		log.WithError(err).Errorf("Failed to create consumer")
+		pc.log.WithError(err).Error("Failed to create consumer")
 		return nil, err
 	}
 	pc.log.Info("Created consumer")
@@ -348,7 +354,7 @@ func (pc *partitionConsumer) internalBeforeReconsume(msg Message, reconsumeOptio
 			} else {
 				delayLevels += 1
 			}
-		}else{
+		} else {
 			delayLevels = 1
 		}
 		delayTime = pc.options.delayLevelUtil.GetDelayTime(delayLevels)
@@ -571,7 +577,7 @@ func (pc *partitionConsumer) internalSeekByTime(seek *seekByTimeRequest) {
 
 func (pc *partitionConsumer) clearMessageCh() {
 Label:
-	for ; ; {
+	for {
 		select {
 		case <-pc.messageCh:
 		default:
@@ -666,6 +672,7 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 				topic:               pc.topic,
 				msgID:               msgID,
 				payLoad:             payload,
+				schema:              pc.options.schema,
 				replicationClusters: msgMeta.GetReplicateTo(),
 				replicatedFrom:      msgMeta.GetReplicatedFrom(),
 				redeliveryCount:     response.GetRedeliveryCount(),
@@ -680,6 +687,7 @@ func (pc *partitionConsumer) MessageReceived(response *pb.CommandMessage, header
 				topic:               pc.topic,
 				msgID:               msgID,
 				payLoad:             payload,
+				schema:              pc.options.schema,
 				replicationClusters: msgMeta.GetReplicateTo(),
 				replicatedFrom:      msgMeta.GetReplicatedFrom(),
 				redeliveryCount:     response.GetRedeliveryCount(),
@@ -714,7 +722,8 @@ func (pc *partitionConsumer) messageShouldBeDiscarded(msgID trackingMessageID) b
 
 func (pc *partitionConsumer) ConnectionClosed() {
 	// Trigger reconnection in the consumer goroutine
-	pc.eventsCh <- &connectionClosed{}
+	pc.log.Debug("connection closed and send to connectClosedCh")
+	pc.connectClosedCh <- connectionClosed{}
 }
 
 // Flow command gives additional permits to send messages to the consumer.
@@ -881,11 +890,22 @@ func (pc *partitionConsumer) runEventsLoop() {
 	defer func() {
 		pc.log.Debug("exiting events loop")
 	}()
+	pc.log.Debug("get into runEventsLoop")
+
+	go func() {
+		for {
+			select {
+			case <-pc.closeCh:
+				return
+			case <-pc.connectClosedCh:
+				pc.log.Debug("runEventsLoop will reconnect")
+				pc.reconnectToBroker()
+			}
+		}
+	}()
+
 	for {
-		select {
-		case <-pc.closeCh:
-			return
-		case i := <-pc.eventsCh:
+		for i := range pc.eventsCh {
 			switch v := i.(type) {
 			case *ackRequest:
 				pc.internalAck(v)
@@ -899,8 +919,6 @@ func (pc *partitionConsumer) runEventsLoop() {
 				pc.internalSeek(v)
 			case *seekByTimeRequest:
 				pc.internalSeekByTime(v)
-			case *connectionClosed:
-				pc.reconnectToBroker()
 			case *closeRequest:
 				pc.internalClose(v)
 				return
@@ -951,8 +969,18 @@ func (pc *partitionConsumer) internalClose(req *closeRequest) {
 }
 
 func (pc *partitionConsumer) reconnectToBroker() {
-	backoff := internal.Backoff{}
-	for {
+	var (
+		maxRetry int
+		backoff  = internal.Backoff{}
+	)
+
+	if pc.options.maxReconnectToBroker == nil {
+		maxRetry = -1
+	} else {
+		maxRetry = int(*pc.options.maxReconnectToBroker)
+	}
+
+	for maxRetry != 0 {
 		if pc.state != consumerReady {
 			// Consumer is already closing
 			return
@@ -968,6 +996,10 @@ func (pc *partitionConsumer) reconnectToBroker() {
 			pc.log.Info("Reconnected consumer to broker")
 			return
 		}
+
+		if maxRetry > 0 {
+			maxRetry--
+		}
 	}
 }
 
@@ -981,7 +1013,25 @@ func (pc *partitionConsumer) grabConn() error {
 
 	subType := toProtoSubType(pc.options.subscriptionType)
 	initialPosition := toProtoInitialPosition(pc.options.subscriptionInitPos)
+	keySharedMeta := toProtoKeySharedMeta(pc.options.keySharedPolicy)
 	requestID := pc.client.rpcClient.NewRequestID()
+
+	pbSchema := new(pb.Schema)
+
+	if pc.options.schema != nil && pc.options.schema.GetSchemaInfo() != nil {
+		tmpSchemaType := pb.Schema_Type(int32(pc.options.schema.GetSchemaInfo().Type))
+		pbSchema = &pb.Schema{
+			Name:       proto.String(pc.options.schema.GetSchemaInfo().Name),
+			Type:       &tmpSchemaType,
+			SchemaData: []byte(pc.options.schema.GetSchemaInfo().Schema),
+			Properties: internal.ConvertFromStringMap(pc.options.schema.GetSchemaInfo().Properties),
+		}
+		pc.log.Debugf("The partition consumer schema name is: %s", pbSchema.Name)
+	} else {
+		pbSchema = nil
+		pc.log.Debug("The partition consumer schema is nil")
+	}
+
 	cmdSubscribe := &pb.CommandSubscribe{
 		Topic:                      proto.String(pc.topic),
 		Subscription:               proto.String(pc.options.subscription),
@@ -993,9 +1043,10 @@ func (pc *partitionConsumer) grabConn() error {
 		Durable:                    proto.Bool(pc.options.subscriptionMode == durable),
 		Metadata:                   internal.ConvertFromStringMap(pc.options.metadata),
 		ReadCompacted:              proto.Bool(pc.options.readCompacted),
-		Schema:                     nil,
+		Schema:                     pbSchema,
 		InitialPosition:            initialPosition.Enum(),
 		ReplicateSubscriptionState: proto.Bool(pc.options.replicateSubscriptionState),
+		KeySharedMeta:              keySharedMeta,
 	}
 
 	pc.startMessageID = pc.clearReceiverQueue()

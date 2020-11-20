@@ -25,12 +25,13 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/sirupsen/logrus"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/auth"
 
 	pb "github.com/TencentCloud/tdmq-go-client/pulsar/internal/pulsar_proto"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 const (
@@ -46,16 +47,25 @@ type client struct {
 	rpcClient     internal.RPCClient
 	handlers      internal.ClientHandlers
 	lookupService internal.LookupService
+
+	log log.Logger
 }
 
 func newClient(options ClientOptions) (Client, error) {
+	var logger log.Logger
+	if options.Logger != nil {
+		logger = options.Logger
+	} else {
+		logger = log.NewLoggerWithLogrus(logrus.StandardLogger())
+	}
+
 	if options.URL == "" {
 		return nil, newError(ResultInvalidConfiguration, "URL is required for client")
 	}
 
 	url, err := url.Parse(options.URL)
 	if err != nil {
-		log.WithError(err).Error("Failed to parse service URL")
+		logger.WithError(err).Error("Failed to parse service URL")
 		return nil, newError(ResultInvalidConfiguration, "Invalid service URL")
 	}
 
@@ -106,10 +116,11 @@ func newClient(options ClientOptions) (Client, error) {
 
 	c := &client{
 		options: &options,
-		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout,maxConnectionsPerHost),
+		cnxPool: internal.NewConnectionPoolWithAuthCloud(options.AuthCloud, tlsConfig, authProvider, connectionTimeout, maxConnectionsPerHost, logger),
+		log:     logger,
 	}
-	c.rpcClient = internal.NewRPCClient(url, c.cnxPool, operationTimeout)
-	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil,options.ListenerName)
+	c.rpcClient = internal.NewRPCClient(url, c.cnxPool, operationTimeout, logger)
+	c.lookupService = internal.NewLookupService(c.rpcClient, url, tlsConfig != nil, options.ListenerName, logger)
 	c.handlers = internal.NewClientHandlers()
 	return c, nil
 }

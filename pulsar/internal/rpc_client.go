@@ -31,7 +31,7 @@ import (
 
 	"github.com/gogo/protobuf/proto"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 var (
@@ -60,7 +60,7 @@ type RPCClient interface {
 	Request(logicalAddr *url.URL, physicalAddr *url.URL, requestID uint64,
 		cmdType pb.BaseCommand_Type, message proto.Message) (*RPCResult, error)
 
-	RequestOnCnxNoWait(cnx Connection, cmdType pb.BaseCommand_Type, message proto.Message)
+	RequestOnCnxNoWait(cnx Connection, cmdType pb.BaseCommand_Type, message proto.Message) error
 
 	RequestOnCnx(cnx Connection, requestID uint64, cmdType pb.BaseCommand_Type, message proto.Message) (*RPCResult, error)
 }
@@ -73,15 +73,16 @@ type rpcClient struct {
 	producerIDGenerator uint64
 	consumerIDGenerator uint64
 
-	log *log.Entry
+	log log.Logger
 }
 
-func NewRPCClient(serviceURL *url.URL, pool ConnectionPool, requestTimeout time.Duration) RPCClient {
+func NewRPCClient(serviceURL *url.URL, pool ConnectionPool,
+	requestTimeout time.Duration, logger log.Logger) RPCClient {
 	return &rpcClient{
 		serviceURL:     serviceURL,
 		pool:           pool,
 		requestTimeout: requestTimeout,
-		log:            log.WithField("serviceURL", serviceURL),
+		log:            logger.SubLogger(log.Fields{"serviceURL": serviceURL}),
 	}
 }
 
@@ -163,9 +164,9 @@ func (c *rpcClient) RequestOnCnx(cnx Connection, requestID uint64, cmdType pb.Ba
 	return rpcResult, rpcErr
 }
 
-func (c *rpcClient) RequestOnCnxNoWait(cnx Connection, cmdType pb.BaseCommand_Type, message proto.Message) {
+func (c *rpcClient) RequestOnCnxNoWait(cnx Connection, cmdType pb.BaseCommand_Type, message proto.Message) error {
 	rpcRequestCount.Inc()
-	cnx.SendRequestNoWait(baseCommand(cmdType, message))
+	return cnx.SendRequestNoWait(baseCommand(cmdType, message))
 }
 
 func (c *rpcClient) NewRequestID() uint64 {

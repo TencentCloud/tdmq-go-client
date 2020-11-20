@@ -21,7 +21,7 @@ import (
 	"sync"
 	"time"
 
-	log "github.com/sirupsen/logrus"
+	log "github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 type redeliveryConsumer interface {
@@ -36,15 +36,17 @@ type negativeAcksTracker struct {
 	rc           redeliveryConsumer
 	tick         *time.Ticker
 	delay        time.Duration
+	log          log.Logger
 }
 
-func newNegativeAcksTracker(rc redeliveryConsumer, delay time.Duration) *negativeAcksTracker {
+func newNegativeAcksTracker(rc redeliveryConsumer, delay time.Duration, logger log.Logger) *negativeAcksTracker {
 	t := &negativeAcksTracker{
 		doneCh:       make(chan interface{}),
 		negativeAcks: make(map[messageID]time.Time),
 		rc:           rc,
 		tick:         time.NewTicker(delay / 3),
 		delay:        delay,
+		log:          logger,
 	}
 
 	go t.track()
@@ -93,7 +95,7 @@ func (t *negativeAcksTracker) track() {
 	for {
 		select {
 		case <-t.doneCh:
-			log.Debug("Closing nack tracker")
+			t.log.Debug("Closing nack tracker")
 			return
 
 		case <-t.tick.C:
@@ -103,9 +105,9 @@ func (t *negativeAcksTracker) track() {
 				now := time.Now()
 				msgIds := make([]messageID, 0)
 				for msgID, targetTime := range t.negativeAcks {
-					log.Debugf("MsgId: %v -- targetTime: %v -- now: %v", msgID, targetTime, now)
+					t.log.Debugf("MsgId: %v -- targetTime: %v -- now: %v", msgID, targetTime, now)
 					if targetTime.Before(now) {
-						log.Debugf("Adding MsgId: %v", msgID)
+						t.log.Debugf("Adding MsgId: %v", msgID)
 						msgIds = append(msgIds, msgID)
 						delete(t.negativeAcks, msgID)
 					}

@@ -28,7 +28,7 @@ import (
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal/auth"
 
-	log "github.com/sirupsen/logrus"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 // ConnectionPool is a interface of connection pool.
@@ -51,6 +51,8 @@ type connectionPool struct {
 
 	maxConnectionsPerHost int32
 	roundRobinCnt         int32
+
+	log log.Logger
 }
 
 // NewConnectionPool init connection pool.
@@ -71,13 +73,15 @@ func NewConnectionPoolWithAuthCloud(
 	authCloud authcloud.AuthenticationCloud,
 	tlsOptions *TLSOptions, auth auth.Provider,
 	connectionTimeout time.Duration,
-	maxConnectionsPerHost int) ConnectionPool {
+	maxConnectionsPerHost int,
+	logger log.Logger) ConnectionPool {
 	return &connectionPool{
 		authCloud:             authCloud,
 		connectionTimeout:     connectionTimeout,
 		tlsOptions:            tlsOptions,
 		auth:                  auth,
 		maxConnectionsPerHost: int32(maxConnectionsPerHost),
+		log:                   logger,
 	}
 }
 
@@ -86,7 +90,7 @@ func (p *connectionPool) GetConnection(logicalAddr *url.URL, physicalAddr *url.U
 	cachedCnx, found := p.pool.Load(key)
 	if found {
 		cnx := cachedCnx.(*connection)
-		log.Debug("Found connection in cache:", cnx.logicalAddr, cnx.physicalAddr)
+		p.log.Debug("Found connection in cache:", cnx.logicalAddr, cnx.physicalAddr)
 
 		if err := cnx.waitUntilReady(); err == nil {
 			// Connection is ready to be used
@@ -94,11 +98,11 @@ func (p *connectionPool) GetConnection(logicalAddr *url.URL, physicalAddr *url.U
 		}
 		// The cached connection is failed
 		p.pool.Delete(key)
-		log.Debug("Removed failed connection from pool:", cnx.logicalAddr, cnx.physicalAddr)
+		p.log.Debug("Removed failed connection from pool:", cnx.logicalAddr, cnx.physicalAddr)
 	}
 
 	// Try to create a new connection
-	newConn := newConnectionAuthCloud(logicalAddr, physicalAddr, p.tlsOptions, p.connectionTimeout, p.auth, p.authCloud)
+	newConn := newConnectionAuthCloud(logicalAddr, physicalAddr, p.tlsOptions, p.connectionTimeout, p.auth, p.authCloud, p.log)
 	newCnx, wasCached := p.pool.LoadOrStore(key, newConn)
 	cnx := newCnx.(*connection)
 

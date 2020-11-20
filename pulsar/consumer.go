@@ -110,6 +110,9 @@ type ConsumerOptions struct {
 	// By default is nil and there's no DLQ
 	DLQ *DLQPolicy
 
+	// Configuration for Key Shared consumer policy.
+	KeySharedPolicy *KeySharedPolicy
+
 	// Configuration for Retry Letter Queue consumer policy
 	// Default is false,means consumer will subscribe the retry letter topic
 	EnableRetry bool
@@ -156,6 +159,11 @@ type ConsumerOptions struct {
 
 	// A chain of interceptors, These interceptors will be called at some points defined in ConsumerInterceptor interface.
 	Interceptors ConsumerInterceptors
+
+	Schema Schema
+
+	// MaxReconnectToBroker set the maximum retry number of reconnectToBroker. (default: ultimate)
+	MaxReconnectToBroker *uint
 }
 
 // Consumer is an interface that abstracts behavior of Pulsar's consumer

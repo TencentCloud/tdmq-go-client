@@ -24,24 +24,25 @@ import (
 	"time"
 
 	"github.com/TencentCloud/tdmq-go-client/pulsar/internal"
-	log "github.com/sirupsen/logrus"
+	"github.com/TencentCloud/tdmq-go-client/pulsar/log"
 )
 
 type dlqRouter struct {
-	producerLock   sync.Mutex
-	client         Client
-	retryProducer  Producer
-	producer       Producer
-	policy         *DLQPolicy
-	messageCh      chan ConsumerMessage
-	closeCh        chan interface{}
-	log            *log.Entry
+	producerLock  sync.Mutex
+	client        Client
+	retryProducer Producer
+	producer      Producer
+	policy        *DLQPolicy
+	messageCh     chan ConsumerMessage
+	closeCh       chan interface{}
+	log           log.Logger
 }
 
-func newDlqRouter(client Client, policy *DLQPolicy) (*dlqRouter, error) {
+func newDlqRouter(client Client, policy *DLQPolicy, logger log.Logger) (*dlqRouter, error) {
 	r := &dlqRouter{
 		client: client,
 		policy: policy,
+		log:    logger,
 	}
 
 	if policy != nil {
@@ -55,7 +56,7 @@ func newDlqRouter(client Client, policy *DLQPolicy) (*dlqRouter, error) {
 
 		r.messageCh = make(chan ConsumerMessage)
 		r.closeCh = make(chan interface{}, 1)
-		r.log = log.WithField("dlq-topic", policy.Topic)
+		r.log = logger.SubLogger(log.Fields{"dlq-topic": policy.DeadLetterTopic})
 		go r.run()
 	}
 	return r, nil
@@ -104,7 +105,11 @@ func (r *dlqRouter) run() {
 				ReplicationClusters: msg.replicationClusters,
 			}, func(MessageID, *ProducerMessage, error) {
 				r.log.WithField("msgID", msgID).Debug("Sent message to DLQ")
-				cm.Consumer.AckID(msgID)
+
+				// The Producer ack might be coming from the connection go-routine that
+				// is also used by the consumer. In that case we would get a dead-lock
+				// if we'd try to ack.
+				go cm.Consumer.AckID(msgID)
 			})
 
 		case <-r.closeCh:
