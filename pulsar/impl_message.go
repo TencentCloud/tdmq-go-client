@@ -104,7 +104,7 @@ func (id messageID) Serialize() []byte {
 }
 
 func (id messageID) String() string {
-	return fmt.Sprintf("%d:%d:%d", id.ledgerID, id.entryID, id.partitionIdx)
+	return fmt.Sprintf("%d:%d:%d:%d", id.ledgerID, id.entryID, id.batchIdx, id.partitionIdx)
 }
 
 func deserializeMessageID(data []byte) (MessageID, error) {
