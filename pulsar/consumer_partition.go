@@ -229,6 +229,7 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 	err := pc.grabConn()
 	if err != nil {
 		pc.log.WithError(err).Error("Failed to create consumer")
+		pc.nackTracker.Close()
 		return nil, err
 	}
 	pc.log.Info("Created consumer")
@@ -237,6 +238,7 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 	if pc.options.startMessageIDInclusive && pc.startMessageID == lastestMessageID {
 		msgID, err := pc.requestGetLastMessageID()
 		if err != nil {
+			pc.nackTracker.Close()
 			return nil, err
 		}
 		if msgID.entryID != noMessageEntry {
@@ -244,6 +246,7 @@ func newPartitionConsumer(parent Consumer, client *client, options *partitionCon
 
 			err = pc.requestSeek(msgID.messageID)
 			if err != nil {
+				pc.nackTracker.Close()
 				return nil, err
 			}
 		}
@@ -930,6 +933,10 @@ func (pc *partitionConsumer) runEventsLoop() {
 func (pc *partitionConsumer) internalClose(req *closeRequest) {
 	defer close(req.doneCh)
 	if pc.state != consumerReady {
+		// this might be redundant but to ensure nack tracker is closed
+		if pc.nackTracker != nil {
+			pc.nackTracker.Close()
+		}
 		return
 	}
 
