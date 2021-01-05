@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/beefsack/go-rate"
@@ -39,6 +40,7 @@ type ProduceArgs struct {
 	BatchingMaxSize    int
 	MessageSize        int
 	ProducerQueueSize  int
+	TopicsNum          int
 }
 
 func newProducerCommand() *cobra.Command {
@@ -53,7 +55,12 @@ func newProducerCommand() *cobra.Command {
 				RunProfiling(stop)
 			}
 			produceArgs.Topic = args[0]
-			produce(&produceArgs, stop)
+			for i := 0; i < produceArgs.TopicsNum; i++ {
+				topicName := fmt.Sprintf("%s_%d", produceArgs.Topic, i)
+				go func(produceArgs ProduceArgs) {
+					produce(&produceArgs, stop, topicName)
+				}(produceArgs)
+			}
 		},
 	}
 
@@ -69,11 +76,13 @@ func newProducerCommand() *cobra.Command {
 		"Message size")
 	flags.IntVarP(&produceArgs.ProducerQueueSize, "queue-size", "q", 1000,
 		"Produce queue size")
+	flags.IntVarP(&produceArgs.TopicsNum, "topics-num", "tm", 1,
+		"Topics number")
 
 	return cmd
 }
 
-func produce(produceArgs *ProduceArgs, stop <-chan struct{}) {
+func produce(produceArgs *ProduceArgs, stop <-chan struct{}, topicName string) {
 	b, _ := json.MarshalIndent(clientArgs, "", "  ")
 	log.Info("Client config: ", string(b))
 	b, _ = json.MarshalIndent(produceArgs, "", "  ")
@@ -86,7 +95,7 @@ func produce(produceArgs *ProduceArgs, stop <-chan struct{}) {
 	defer client.Close()
 
 	producer, err := client.CreateProducer(pulsar.ProducerOptions{
-		Topic:                   produceArgs.Topic,
+		Topic:                   topicName,
 		MaxPendingMessages:      produceArgs.ProducerQueueSize,
 		BatchingMaxPublishDelay: time.Millisecond * time.Duration(produceArgs.BatchingTimeMillis),
 		BatchingMaxSize:         uint(produceArgs.BatchingMaxSize * 1024),
