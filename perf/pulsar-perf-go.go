@@ -45,7 +45,7 @@ type ClientArgs struct {
 	ServiceURL       string
 	TokenFile        string
 	TLSTrustCertFile string
-	AuthToken       string
+	AuthToken        string
 }
 
 var clientArgs ClientArgs
@@ -98,13 +98,15 @@ func main() {
 
 	flags := rootCmd.PersistentFlags()
 	flags.BoolVar(&FlagProfile, "profile", false, "enable profiling")
-	flags.IntVar(&PrometheusPort, "metrics", 8000, "Port to use to export metrics for Prometheus. Use -1 to disable.")
+	flags.IntVar(&PrometheusPort, "metrics", 8000,
+		"Port to use to export metrics for Prometheus. Use -1 to disable.")
 	flags.BoolVar(&flagDebug, "debug", false, "enable debug output")
 	flags.StringVarP(&clientArgs.ServiceURL, "service-url", "u",
 		"pulsar://localhost:6650", "The Pulsar service URL")
 	flags.StringVar(&clientArgs.TokenFile, "token-file", "", "file path to the Pulsar JWT file")
 	flags.StringVar(&clientArgs.AuthToken, "token-string", "", "string to the Pulsar JWT")
-	flags.StringVar(&clientArgs.TLSTrustCertFile, "trust-cert-file", "", "file path to the trusted certificate file")
+	flags.StringVar(&clientArgs.TLSTrustCertFile, "trust-cert-file", "",
+		"file path to the trusted certificate file")
 
 	rootCmd.AddCommand(newProducerCommand())
 	rootCmd.AddCommand(newConsumerCommand())
