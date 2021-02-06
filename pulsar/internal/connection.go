@@ -87,6 +87,9 @@ type ConnectionListener interface {
 	// ReceivedSendReceipt receive and process the return value of the send command.
 	ReceivedSendReceipt(response *pb.CommandSendReceipt)
 
+	//receive and process the return value of the sendError command.
+	ReceivedSendError(response *pb.CommandSendError)
+
 	// ConnectionClosed close the TCP connection.
 	ConnectionClosed()
 }
@@ -589,6 +592,7 @@ func (c *connection) internalReceivedCommand(cmd *pb.BaseCommand, headersAndPayl
 		c.handleSendReceipt(cmd.GetSendReceipt())
 
 	case pb.BaseCommand_SEND_ERROR:
+		c.handleSendError(cmd.GetSendError())
 
 	case pb.BaseCommand_MESSAGE:
 		c.handleMessage(cmd.GetMessage(), headersAndPayload)
@@ -695,6 +699,20 @@ func (c *connection) handleSendReceipt(response *pb.CommandSendReceipt) {
 		producer.ReceivedSendReceipt(response)
 	} else {
 		c.log.WithField("producerID", producerID).Warn("Got unexpected send receipt for message: ", response.MessageId)
+	}
+}
+
+func (c *connection) handleSendError(response *pb.CommandSendError) {
+	producerID := response.GetProducerId()
+
+	c.Lock()
+	producer, ok := c.listeners[producerID]
+	c.Unlock()
+
+	if ok {
+		producer.ReceivedSendError(response)
+	} else {
+		c.log.WithField("producerID", producerID).Warn("Got unexpected send error")
 	}
 }
 

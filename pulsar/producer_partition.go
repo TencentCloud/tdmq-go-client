@@ -680,6 +680,36 @@ func (p *partitionProducer) internalSendAsync(ctx context.Context, msg *Producer
 	p.eventsChan <- sr
 }
 
+func (p *partitionProducer) ReceivedSendError(response *pb.CommandSendError) {
+	pendingItems := p.pendingQueue.ReadableSlice()
+	if len(pendingItems) > 0 {
+		for _, pi := range pendingItems {
+			if pi.(*pendingItem).sequenceID != response.GetSequenceId() {
+				p.cnx.Close()
+				return
+			}
+			// lock the pending item while sending the requests
+			pi.(*pendingItem).Lock()
+			defer pi.(*pendingItem).Unlock()
+
+			for _, i := range pi.(*pendingItem).sendRequests {
+				sr := i.(*sendRequest)
+				if sr.callback != nil {
+					if response.GetError() == 0 {
+						sr.callback(nil, sr.msg, errors.New("delay time is too long"))
+					} else {
+						sr.callback(nil, sr.msg, errors.New("send error"))
+					}
+				}
+			}
+		}
+	} else {
+		p.log.Warnf("the pending queue is empty, closing connection")
+		p.cnx.Close()
+		return
+	}
+}
+
 func (p *partitionProducer) ReceivedSendReceipt(response *pb.CommandSendReceipt) {
 	pi, ok := p.pendingQueue.Peek().(*pendingItem)
 
