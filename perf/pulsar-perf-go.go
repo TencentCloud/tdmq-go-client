@@ -20,6 +20,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -41,7 +42,10 @@ var flagDebug bool
 var PrometheusPort int
 
 type ClientArgs struct {
-	ServiceURL string
+	ServiceURL       string
+	TokenFile        string
+	TLSTrustCertFile string
+	AuthToken        string
 }
 
 var clientArgs ClientArgs
@@ -50,6 +54,25 @@ func NewClient() (pulsar.Client, error) {
 	clientOpts := pulsar.ClientOptions{
 		URL: clientArgs.ServiceURL,
 	}
+
+	if clientArgs.TokenFile != "" {
+		// read JWT from the file
+		tokenBytes, err := ioutil.ReadFile(clientArgs.TokenFile)
+		if err != nil {
+			log.WithError(err).Errorf("failed to read Pulsar JWT from a file %s", clientArgs.TokenFile)
+			os.Exit(1)
+		}
+		clientOpts.Authentication = pulsar.NewAuthenticationToken(string(tokenBytes))
+	}
+
+	if clientArgs.TLSTrustCertFile != "" {
+		clientOpts.TLSTrustCertsFilePath = clientArgs.TLSTrustCertFile
+	}
+
+	if clientArgs.AuthToken != "" {
+		clientOpts.Authentication = pulsar.NewAuthenticationToken(clientArgs.AuthToken)
+	}
+
 	return pulsar.NewClient(clientOpts)
 }
 
@@ -75,10 +98,15 @@ func main() {
 
 	flags := rootCmd.PersistentFlags()
 	flags.BoolVar(&FlagProfile, "profile", false, "enable profiling")
-	flags.IntVar(&PrometheusPort, "metrics", 8000, "Port to use to export metrics for Prometheus. Use -1 to disable.")
+	flags.IntVar(&PrometheusPort, "metrics", 8000,
+		"Port to use to export metrics for Prometheus. Use -1 to disable.")
 	flags.BoolVar(&flagDebug, "debug", false, "enable debug output")
 	flags.StringVarP(&clientArgs.ServiceURL, "service-url", "u",
 		"pulsar://localhost:6650", "The Pulsar service URL")
+	flags.StringVar(&clientArgs.TokenFile, "token-file", "", "file path to the Pulsar JWT file")
+	flags.StringVar(&clientArgs.AuthToken, "token-string", "", "string to the Pulsar JWT")
+	flags.StringVar(&clientArgs.TLSTrustCertFile, "trust-cert-file", "",
+		"file path to the trusted certificate file")
 
 	rootCmd.AddCommand(newProducerCommand())
 	rootCmd.AddCommand(newConsumerCommand())
