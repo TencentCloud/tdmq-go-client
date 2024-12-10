@@ -140,30 +140,6 @@ func (ce *TokenRetriever) newExchangeCodeRequest(
 	return request, nil
 }
 
-// newDeviceCodeExchangeRequest builds a new DeviceCodeExchangeRequest wrapped in an
-// http.Request
-func (ce *TokenRetriever) newDeviceCodeExchangeRequest(
-	req DeviceCodeExchangeRequest) (*http.Request, error) {
-	uv := url.Values{}
-	uv.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-	uv.Set("client_id", req.ClientID)
-	uv.Set("device_code", req.DeviceCode)
-	euv := uv.Encode()
-
-	request, err := http.NewRequest("POST",
-		req.TokenEndpoint,
-		strings.NewReader(euv),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	request.Header.Add("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Add("Content-Length", strconv.Itoa(len(euv)))
-
-	return request, nil
-}
-
 // newRefreshTokenRequest builds a new RefreshTokenRequest wrapped in an
 // http.Request
 func (ce *TokenRetriever) newRefreshTokenRequest(req RefreshTokenExchangeRequest) (*http.Request, error) {
@@ -260,49 +236,6 @@ func (ce *TokenRetriever) handleAuthTokensResponse(resp *http.Response) (*TokenR
 		RefreshToken: atr.RefreshToken,
 		ExpiresIn:    atr.ExpiresIn,
 	}, nil
-}
-
-// ExchangeDeviceCode uses the DeviceCodeExchangeRequest to exchange a device
-// code for tokens
-func (ce *TokenRetriever) ExchangeDeviceCode(ctx context.Context, req DeviceCodeExchangeRequest) (*TokenResult, error) {
-	for {
-		request, err := ce.newDeviceCodeExchangeRequest(req)
-		if err != nil {
-			return nil, err
-		}
-
-		response, err := ce.transport.Do(request)
-		if err != nil {
-			return nil, err
-		}
-		token, err := ce.handleAuthTokensResponse(response)
-		if err == nil {
-			return token, nil
-		}
-		terr, ok := err.(*TokenError)
-		if !ok {
-			return nil, err
-		}
-		switch terr.ErrorCode {
-		case "expired_token":
-			// The user has not authorized the device quickly enough, so the device_code has expired.
-			return nil, fmt.Errorf("the device code has expired")
-		case "access_denied":
-			// The user refused to authorize the device
-			return nil, fmt.Errorf("the device was not authorized")
-		case "authorization_pending":
-			// Still waiting for the user to take action
-		case "slow_down":
-			// You are polling too fast
-		}
-
-		select {
-		case <-time.After(req.PollInterval):
-			continue
-		case <-ctx.Done():
-			return nil, errors.New("cancelled")
-		}
-	}
 }
 
 // ExchangeRefreshToken uses the RefreshTokenExchangeRequest to exchange a
